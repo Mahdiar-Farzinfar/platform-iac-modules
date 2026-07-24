@@ -1,0 +1,161 @@
+---
+# =============================================================================
+# yamllint — enterprise baseline for platform-iac-modules
+# Location: tooling/.yamllint.yml
+#
+# Goals:
+#   - Fail on structural/ambiguous YAML issues
+#   - Stay practical for GHA / compose / Taskfile / renovate-style YAML
+#   - Cross-platform (LF), CI-friendly, pre-commit friendly
+#
+# Usage examples:
+#   yamllint -c tooling/.yamllint.yml .
+#   yamllint -c tooling/.yamllint.yml .github modules catalog docs
+# =============================================================================
+
+extends: default
+
+# -----------------------------------------------------------------------------
+# Ignore generated / vendor / local state paths only.
+# Keep policy configs (workflows, compose, catalog) under lint.
+# -----------------------------------------------------------------------------
+ignore: |
+  .git/
+  .terraform/
+  **/.terraform/
+  **/.terragrunt-cache/
+  **/terraform.tfstate
+  **/terraform.tfstate.*
+  **/.terraform.lock.hcl
+  node_modules/
+  vendor/
+  dist/
+  build/
+  bin/
+  coverage/
+  .cache/
+  .tox/
+  .venv/
+  venv/
+  __pycache__/
+  *.pyc
+  .DS_Store
+  Thumbs.db
+
+yaml-files:
+  - "*.yaml"
+  - "*.yml"
+  - ".yamllint"
+  - ".yamllint.yml"
+  - ".yamllint.yaml"
+
+rules:
+  # ---------------------------------------------------------------------------
+  # Structure / correctness (strict)
+  # ---------------------------------------------------------------------------
+  key-duplicates: enable
+
+  new-line-at-end-of-file: enable
+
+  trailing-spaces: enable
+
+  new-lines:
+    type: unix
+
+  empty-lines:
+    max: 2
+    max-start: 0
+    max-end: 1
+
+  empty-values:
+    forbid-in-block-mappings: true
+    forbid-in-flow-mappings: true
+    forbid-in-block-sequences: false
+
+  octal-values:
+    forbid-implicit-octal: true
+    forbid-explicit-octal: true
+
+  # ---------------------------------------------------------------------------
+  # Formatting (consistent, not pedantic)
+  # ---------------------------------------------------------------------------
+  indentation:
+    spaces: 2
+    indent-sequences: consistent
+    check-multi-line-strings: false
+
+  hyphens:
+    max-spaces-after: 1
+
+  colons:
+    max-spaces-before: 0
+    max-spaces-after: 1
+
+  commas:
+    max-spaces-before: 0
+    min-spaces-after: 1
+    max-spaces-after: 1
+
+  braces:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+    min-spaces-inside-empty: 0
+    max-spaces-inside-empty: 0
+
+  brackets:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+    min-spaces-inside-empty: 0
+    max-spaces-inside-empty: 0
+
+  # GitHub Actions / compose / Taskfile often omit document markers intentionally.
+  document-start: disable
+  document-end: disable
+
+  # Keep natural key order for readability (do not force alphabetical).
+  key-ordering: disable
+
+  # ---------------------------------------------------------------------------
+  # Comments
+  # ---------------------------------------------------------------------------
+  comments:
+    require-starting-space: true
+    ignore-shebangs: true
+    min-spaces-from-content: 1
+
+  comments-indentation: enable
+
+  # ---------------------------------------------------------------------------
+  # Line length
+  # ---------------------------------------------------------------------------
+  line-length:
+    max: 300
+    allow-non-breakable-words: true
+    allow-non-breakable-inline-mappings: true
+
+  # ---------------------------------------------------------------------------
+  # Truthy values
+  # Critical for GitHub Actions (`on:`) and common YAML boolean aliases.
+  # check-keys: false avoids false positives on workflow trigger keys.
+  # ---------------------------------------------------------------------------
+  truthy:
+    allowed-values:
+      - "true"
+      - "false"
+      - "on"
+      - "off"
+      - "yes"
+      - "no"
+    check-keys: false
+
+  quoted-strings:
+    quote-type: any
+    required: false
+    extra-required: []
+    allow-quoted-quotes: true
+
+  float-values:
+    require-numeral-before-decimal: false
+    forbid-scientific-notation: false
+    forbid-nan: true
+    forbid-inf: true

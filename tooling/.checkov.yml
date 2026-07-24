@@ -1,0 +1,89 @@
+---
+# tooling/.checkov.yml
+#
+# Checkov configuration for platform-iac-modules
+# Docs: https://www.checkov.io/
+#
+# Goals:
+# - Fail fast on HIGH/CRITICAL findings in CI
+# - Keep local runs actionable and deterministic
+# - Reduce noise from examples/tests/generated content
+# - Provide machine-readable reports for pipeline ingestion
+
+# -----------------------------------------------------------------------------
+# Scan scope
+# -----------------------------------------------------------------------------
+
+directory:
+  - .
+
+framework:
+  - terraform
+
+# Skip paths that are not production IaC sources
+skip-path:
+  - ".git"
+  - ".github"
+  - ".devcontainer"
+  - ".vscode"
+  - "docs"
+  - "scripts"
+  - "tests"
+  - "**/.terraform/**"
+  - "**/.terragrunt-cache/**"
+  - "**/examples/**"
+
+# Optional: scan downloaded external modules (disabled by default for speed/noise)
+download-external-modules: false
+
+evaluate-variables: true
+
+# Compact output for developers; CI can still parse sarif/json artifacts
+compact: true
+quiet: false
+
+# Ensure deterministic behavior in CI
+soft-fail: false
+
+# -----------------------------------------------------------------------------
+# Policy gates
+# -----------------------------------------------------------------------------
+
+# Gate by severity:
+# - Fail when HIGH/CRITICAL exist
+# - Keep MEDIUM/LOW visible but non-blocking (via reports)
+# Use global skips sparingly and only with documented rationale.
+skip-check:
+  []
+
+# -----------------------------------------------------------------------------
+# Reporting
+# -----------------------------------------------------------------------------
+
+# Generate formats useful for both humans and CI security tooling
+output:
+  - cli
+  - sarif
+  - junitxml
+
+# Persist reports under repo-local artifacts directory
+output-file-path: "reports/checkov/cli.txt,reports/checkov/checkov.sarif,reports/checkov/junit.xml"
+
+# Include check metadata in outputs
+include-all-checkov-policies: true
+
+# -----------------------------------------------------------------------------
+# Runtime / platform
+# -----------------------------------------------------------------------------
+
+# Helpful for self-hosted runners behind proxies; keep commented unless needed
+# client:
+#   no-cert-verify: false
+
+# Mask common sensitive value patterns in output logs (defense-in-depth)
+mask:
+  - "(?i)secret"
+  - "(?i)token"
+  - "(?i)password"
+  - "(?i)access[_-]?key"
+  - "(?i)private[_-]?key"
