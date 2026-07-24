@@ -1,0 +1,357 @@
+---
+name: DevContainer Image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".devcontainer/**"
+      - ".github/workflows/devcontainer-image.yml"
+      - "tooling/**"
+      - "scripts/tools/**"
+    tags:
+      - 'image/devcontainer/v*'
+  pull_request:
+    paths:
+      - ".devcontainer/**"
+      - ".github/workflows/devcontainer-image.yml"
+      - "tooling/**"
+      - "scripts/tools/**"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: devcontainer-image-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CONTEXT: .devcontainer
+  DOCKERFILE: .devcontainer/Dockerfile
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  pr-build-test:
+    name: PR Build & Smoke Test (No Push)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@1044a6dea927916f2c38ba5aeffbc0a847b1221a  # v7.0.0
+        with:
+          fetch-depth: 1
+
+      - name: Validate required files
+        run: |
+          set -euo pipefail
+          test -f "${DOCKERFILE}"
+          test -f ".devcontainer/devcontainer.json"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8  # v4.2.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c  # v4.2.0
+
+      - name: Docker metadata (labels only)
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302  # v6.2.0
+        with:
+          images: local/devcontainer
+          labels: |
+            org.opencontainers.image.title=platform-iac-devcontainer
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Derive Docker build args
+        id: build_args
+        run: |
+          set -euo pipefail
+
+          build_date="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          source_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
+          version="dev"
+
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" && "${GITHUB_REF_NAME:-}" =~ ^image/devcontainer/v(.+)$ ]]; then
+            version="${BASH_REMATCH[1]}"
+          elif [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            version="pr-${{ github.event.pull_request.number }}"
+          elif [[ -n "${GITHUB_REF_NAME:-}" ]]; then
+            version="${GITHUB_REF_NAME}"
+          fi
+
+          {
+            echo "build_date=${build_date}"
+            echo "source_url=${source_url}"
+            echo "version=${version}"
+            echo "licenses=Apache-2.0"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Build image (local load)
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
+        with:
+          context: ${{ env.CONTEXT }}
+          file: ${{ env.DOCKERFILE }}
+          platforms: linux/amd64
+          load: true
+          tags: local/devcontainer:pr
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VCS_REF=${{ github.sha }}
+            BUILD_DATE=${{ steps.build_args.outputs.build_date }}
+            VERSION=${{ steps.build_args.outputs.version }}
+            SOURCE_URL=${{ steps.build_args.outputs.source_url }}
+            LICENSES=${{ steps.build_args.outputs.licenses }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+          sbom: false
+
+      - name: Smoke test image
+        run: |
+          set -euo pipefail
+
+          docker run --rm --entrypoint bash local/devcontainer:pr -lc '
+            set -euo pipefail
+
+            echo "[1] Identity / permissions"
+            id
+            test "$(id -u)" -ne 0
+            whoami | grep -E "^vscode$"
+            sudo -n true
+
+            echo "[2] Runtime defaults / critical files"
+            test -f /usr/local/etc/devcontainer-tool-versions.env
+            test -d /workspaces
+            pwd
+
+            echo "[3] Toolchain presence + version commands"
+            terraform version
+            tflint --version
+            tfsec --version
+            trivy --version
+            terraform-docs --version
+            yq --version
+            just --version
+            golangci-lint --version
+            go version
+            node --version
+            npm --version
+            python --version
+            pip --version
+            pre-commit --version
+            checkov --version
+            detect-secrets --version
+            yamllint --version
+            markdownlint --version
+
+            echo "[4] PATH / venv precedence checks"
+            command -v checkov | grep -E "^/opt/python-tools/bin/checkov$"
+            command -v pre-commit | grep -E "^/opt/python-tools/bin/pre-commit$"
+            command -v terraform >/dev/null
+            command -v trivy >/dev/null
+
+            echo "[5] Minimal functional checks"
+            tmpd="$(mktemp -d)"
+            trap "rm -rf \"$tmpd\"" EXIT
+
+            # Terraform init/validate minimal
+            cat > "$tmpd/main.tf" <<EOF
+            terraform {
+              required_version = ">= 1.0.0"
+            }
+            EOF
+            terraform -chdir="$tmpd" init -backend=false -input=false -no-color
+            terraform -chdir="$tmpd" validate -no-color
+
+            # tflint on minimal config
+            cat > "$tmpd/.tflint.hcl" <<EOF
+            config {
+              module = false
+            }
+            EOF
+            tflint --chdir "$tmpd"
+
+            # checkov minimal scan
+            checkov -d "$tmpd" --quiet || true
+
+            # yq functional parse
+            cat > "$tmpd/a.yaml" <<EOF
+            a:
+              b: 1
+            EOF
+            test "$(yq ".a.b" "$tmpd/a.yaml")" = "1"
+
+            # terraform-docs on minimal module
+            mkdir -p "$tmpd/mod"
+            cat > "$tmpd/mod/variables.tf" <<EOF
+            variable "name" {
+              type = string
+              description = "sample"
+            }
+            EOF
+            terraform-docs markdown table "$tmpd/mod" >/dev/null
+
+            echo "[6] Done"
+          '
+
+  publish-sign-scan:
+    name: Build, Push, Sign, Scan (Main/Manual only)
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    permissions:
+      contents: read
+      packages: write         # push to GHCR
+      id-token: write         # keyless cosign
+      security-events: write  # upload SARIF
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@1044a6dea927916f2c38ba5aeffbc0a847b1221a  # v7.0.0
+        with:
+          fetch-depth: 1
+
+      - name: Derive image metadata
+        id: vars
+        run: |
+          set -euo pipefail
+          owner_lc="$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
+          echo "image=ghcr.io/${owner_lc}/platform-iac-modules" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8  # v4.2.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c  # v4.2.0
+
+      - name: Login to GHCR
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0  # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive semver from release tag
+        id: rel
+        run: |
+          set -euo pipefail
+          semver=""
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            ref="${GITHUB_REF_NAME}"
+            if [[ "${ref}" =~ ^image/devcontainer/v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+              semver="${BASH_REMATCH[1]}"
+            fi
+          fi
+          echo "semver=${semver}" >> "${GITHUB_OUTPUT}"
+
+      - name: Docker metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302  # v6.2.0
+        with:
+          images: ${{ steps.vars.outputs.image }}
+          tags: |
+            type=ref,event=branch
+            type=sha,format=long
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ steps.rel.outputs.semver }},enable=${{ steps.rel.outputs.semver != '' }}
+
+      - name: Derive Docker build args
+        id: build_args
+        run: |
+          set -euo pipefail
+
+          build_date="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          source_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
+          version="dev"
+
+          if [[ -n "${{ steps.rel.outputs.semver }}" ]]; then
+            version="${{ steps.rel.outputs.semver }}"
+          elif [[ -n "${GITHUB_REF_NAME:-}" ]]; then
+            version="${GITHUB_REF_NAME}"
+          fi
+
+          {
+            echo "build_date=${build_date}"
+            echo "source_url=${source_url}"
+            echo "version=${version}"
+            echo "licenses=Apache-2.0"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Build and push multi-arch image
+        id: build_push
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
+        with:
+          context: ${{ env.CONTEXT }}
+          file: ${{ env.DOCKERFILE }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VCS_REF=${{ github.sha }}
+            BUILD_DATE=${{ steps.build_args.outputs.build_date }}
+            VERSION=${{ steps.build_args.outputs.version }}
+            SOURCE_URL=${{ steps.build_args.outputs.source_url }}
+            LICENSES=${{ steps.build_args.outputs.licenses }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
+
+      - name: Sign image by digest (keyless OIDC)
+        env:
+          IMAGE: ${{ steps.vars.outputs.image }}
+          DIGEST: ${{ steps.build_push.outputs.digest }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+
+      - name: Verify signature
+        env:
+          IMAGE: ${{ steps.vars.outputs.image }}
+          DIGEST: ${{ steps.build_push.outputs.digest }}
+          CERT_IDENTITY: "https://github.com/${{ github.repository }}/.github/workflows/devcontainer-image.yml@${{ github.ref }}"
+          CERT_ISSUER: "https://token.actions.githubusercontent.com"
+        run: |
+          cosign verify \
+            --certificate-identity "${CERT_IDENTITY}" \
+            --certificate-oidc-issuer "${CERT_ISSUER}" \
+            "${IMAGE}@${DIGEST}" >/dev/null
+
+      - name: Trivy scan by immutable digest
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
+        with:
+          image-ref: ${{ steps.vars.outputs.image }}@${{ steps.build_push.outputs.digest }}
+          format: sarif
+          output: trivy-image.sarif
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+
+      - name: Upload Trivy SARIF
+        uses: github/codeql-action/upload-sarif@54f647b7e1bb85c95cddabcd46b0c578ec92bc1a  # v4.36.3
+        with:
+          sarif_file: trivy-image.sarif
+
+  all-jobs-passed:
+    name: All Jobs Passed
+    if: always()
+    needs: [pr-build-test, publish-sign-scan]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check all jobs
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" || "${{ contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            exit 1
+          fi

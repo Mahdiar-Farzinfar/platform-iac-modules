@@ -1,0 +1,291 @@
+---
+name: "Documentation Pipeline"
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "modules/**"
+      - "**.tf"
+      - ".terraform-docs.yml"
+      - "tooling/.tool-versions"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    paths:
+      - "modules/**"
+      - "**.tf"
+      - ".terraform-docs.yml"
+      - "tooling/.tool-versions"
+      - ".github/workflows/docs.yml"
+
+permissions: {}
+
+concurrency:
+  group: documentation-pipeline-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TOOL_VERSIONS_FILE: tooling/.tool-versions
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  validate-docs:
+    name: "Generate and Validate Docs"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      docs_drifted: ${{ steps.drift.outputs.drifted }}
+
+    steps:
+      - name: "Checkout code"
+        uses: actions/checkout@1044a6dea927916f2c38ba5aeffbc0a847b1221a  # v7.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: "Resolve tool versions"
+        id: versions
+        run: |
+          set -euo pipefail
+
+          if [[ ! -f "${TOOL_VERSIONS_FILE}" ]]; then
+            echo "::error::Tool versions file not found: ${TOOL_VERSIONS_FILE}"
+            exit 1
+          fi
+
+          task_version="$(awk '$1 == "task" { print $2; exit }' "${TOOL_VERSIONS_FILE}")"
+          terraform_docs_version="$(awk '$1 == "terraform-docs" { print $2; exit }' "${TOOL_VERSIONS_FILE}")"
+
+          if [[ -z "${task_version}" ]]; then
+            echo "::error::task version is not defined in ${TOOL_VERSIONS_FILE}"
+            exit 1
+          fi
+
+          if [[ -z "${terraform_docs_version}" ]]; then
+            echo "::error::terraform-docs version is not defined in ${TOOL_VERSIONS_FILE}"
+            exit 1
+          fi
+
+          task_version="${task_version#v}"
+          terraform_docs_version="${terraform_docs_version#v}"
+
+          echo "task_version=${task_version}" >> "${GITHUB_OUTPUT}"
+          echo "terraform_docs_version=${terraform_docs_version}" >> "${GITHUB_OUTPUT}"
+          echo "terraform_docs_tag=v${terraform_docs_version}" >> "${GITHUB_OUTPUT}"
+
+      - name: "Install Task"
+        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
+        with:
+          version: ${{ steps.versions.outputs.task_version }}
+
+      - name: "Install terraform-docs"
+        run: |
+          set -euo pipefail
+
+          version="${{ steps.versions.outputs.terraform_docs_version }}"
+          tag="${{ steps.versions.outputs.terraform_docs_tag }}"
+          archive="terraform-docs-${tag}-linux-amd64.tar.gz"
+          checksum_file="terraform-docs-${tag}.sha256sum"
+          base_url="https://github.com/terraform-docs/terraform-docs/releases/download/${tag}"
+
+          curl --fail --silent --show-error --location \
+            --proto '=https' --tlsv1.2 \
+            --retry 3 --retry-delay 2 --retry-connrefused \
+            --output "${archive}" \
+            "${base_url}/${archive}"
+
+          curl --fail --silent --show-error --location \
+            --proto '=https' --tlsv1.2 \
+            --retry 3 --retry-delay 2 --retry-connrefused \
+            --output "${checksum_file}" \
+            "${base_url}/${checksum_file}"
+
+          grep " ${archive}\$" "${checksum_file}" | sha256sum --check -
+
+          install_dir="${RUNNER_TEMP}/bin"
+          mkdir -p "${install_dir}"
+
+          tar -xzf "${archive}" terraform-docs
+          install -m 0755 terraform-docs "${install_dir}/terraform-docs"
+
+          echo "${install_dir}" >> "${GITHUB_PATH}"
+          terraform-docs --version
+
+      - name: "Generate documentation"
+        run: task docs
+
+      - name: "Detect documentation drift"
+        id: drift
+        run: |
+          set -euo pipefail
+
+          if task docs:check; then
+            echo "drifted=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "drifted=true" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: "Fail PR when docs drift exists"
+        if: github.event_name == 'pull_request' && steps.drift.outputs.drifted == 'true'
+        run: |
+          echo "::error::Generated documentation is out of date. Run 'task docs' and commit the result."
+          exit 1
+
+  create-docs-pr:
+    name: "Create Documentation PR"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs:
+      - validate-docs
+    if: >
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      needs.validate-docs.outputs.docs_drifted == 'true'
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: "Checkout code"
+        uses: actions/checkout@1044a6dea927916f2c38ba5aeffbc0a847b1221a  # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: "Resolve tool versions"
+        id: versions
+        run: |
+          set -euo pipefail
+
+          if [[ ! -f "${TOOL_VERSIONS_FILE}" ]]; then
+            echo "::error::Tool versions file not found: ${TOOL_VERSIONS_FILE}"
+            exit 1
+          fi
+
+          task_version="$(awk '$1 == "task" { print $2; exit }' "${TOOL_VERSIONS_FILE}")"
+          terraform_docs_version="$(awk '$1 == "terraform-docs" { print $2; exit }' "${TOOL_VERSIONS_FILE}")"
+
+          if [[ -z "${task_version}" ]]; then
+            echo "::error::task version is not defined in ${TOOL_VERSIONS_FILE}"
+            exit 1
+          fi
+
+          if [[ -z "${terraform_docs_version}" ]]; then
+            echo "::error::terraform-docs version is not defined in ${TOOL_VERSIONS_FILE}"
+            exit 1
+          fi
+
+          task_version="${task_version#v}"
+          terraform_docs_version="${terraform_docs_version#v}"
+
+          echo "task_version=${task_version}" >> "${GITHUB_OUTPUT}"
+          echo "terraform_docs_version=${terraform_docs_version}" >> "${GITHUB_OUTPUT}"
+          echo "terraform_docs_tag=v${terraform_docs_version}" >> "${GITHUB_OUTPUT}"
+
+      - name: "Install Task"
+        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
+        with:
+          version: ${{ steps.versions.outputs.task_version }}
+
+      - name: "Install terraform-docs"
+        run: |
+          set -euo pipefail
+
+          version="${{ steps.versions.outputs.terraform_docs_version }}"
+          tag="${{ steps.versions.outputs.terraform_docs_tag }}"
+          archive="terraform-docs-${tag}-linux-amd64.tar.gz"
+          checksum_file="terraform-docs-${tag}.sha256sum"
+          base_url="https://github.com/terraform-docs/terraform-docs/releases/download/${tag}"
+
+          curl --fail --silent --show-error --location \
+            --proto '=https' --tlsv1.2 \
+            --retry 3 --retry-delay 2 --retry-connrefused \
+            --output "${archive}" \
+            "${base_url}/${archive}"
+
+          curl --fail --silent --show-error --location \
+            --proto '=https' --tlsv1.2 \
+            --retry 3 --retry-delay 2 --retry-connrefused \
+            --output "${checksum_file}" \
+            "${base_url}/${checksum_file}"
+
+          grep " ${archive}\$" "${checksum_file}" | sha256sum --check -
+
+          install_dir="${RUNNER_TEMP}/bin"
+          mkdir -p "${install_dir}"
+
+          tar -xzf "${archive}" terraform-docs
+          install -m 0755 terraform-docs "${install_dir}/terraform-docs"
+
+          echo "${install_dir}" >> "${GITHUB_PATH}"
+          terraform-docs --version
+
+      - name: "Generate documentation"
+        run: task docs
+
+      - name: "Create pull request for generated docs"
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1  # v8.1.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "docs(terraform): auto-generate documentation"
+          committer: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+          author: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+          branch: "automation/terraform-docs"
+          delete-branch: true
+          title: "docs(terraform): auto-generate documentation"
+          body: |
+            This PR updates generated Terraform documentation to keep it in sync with the latest Terraform code changes.
+
+            - Generated automatically by the documentation pipeline
+            - Source of truth: Terraform modules and `.terraform-docs.yml`
+          labels: |
+            documentation
+            automation
+          add-paths: |
+            README.md
+            modules/**
+
+  all-checks-passed:
+    name: "All Checks Passed"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs:
+      - validate-docs
+      - create-docs-pr
+    if: always()
+    permissions: {}
+
+    steps:
+      - name: "Evaluate job results"
+        run: |
+          set -euo pipefail
+
+          validate_result="${{ needs.validate-docs.result }}"
+          create_pr_result="${{ needs.create-docs-pr.result }}"
+
+          echo "validate-docs: ${validate_result}"
+          echo "create-docs-pr: ${create_pr_result}"
+
+          failed=false
+
+          if [[ "${validate_result}" != "success" ]]; then
+            echo "::error::validate-docs did not succeed (result: ${validate_result})"
+            failed=true
+          fi
+
+          if [[ "${create_pr_result}" != "success" && "${create_pr_result}" != "skipped" ]]; then
+            echo "::error::create-docs-pr did not succeed (result: ${create_pr_result})"
+            failed=true
+          fi
+
+          if [[ "${failed}" == "true" ]]; then
+            exit 1
+          fi
+
+          echo "All required jobs passed."

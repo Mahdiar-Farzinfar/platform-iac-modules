@@ -1,0 +1,477 @@
+---
+name: Validate
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "modules/**"
+      - "tooling/**"
+      - "catalog/**"
+      - "scripts/**"
+      - "docs/**"
+      - "Makefile"
+      - "Taskfile.yml"
+      - "justfile"
+      - ".editorconfig"
+      - ".pre-commit-config.yaml"
+      - "tooling/.tflint.hcl"
+      - "tooling/.tool-versions"
+      - "tooling/.terraform-version"
+      - ".terraform-docs.yml"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/*.yml"
+
+  push:
+    branches: [main]
+    paths:
+      - "modules/**"
+      - "tooling/**"
+      - "catalog/**"
+      - "scripts/**"
+      - "docs/**"
+      - "Makefile"
+      - "Taskfile.yml"
+      - "justfile"
+      - ".editorconfig"
+      - ".pre-commit-config.yaml"
+      - "tooling/.tflint.hcl"
+      - "tooling/.tool-versions"
+      - "tooling/.terraform-version"
+      - ".terraform-docs.yml"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/*.yml"
+
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Validation mode"
+        required: true
+        default: "auto"
+        type: choice
+        options:
+          - auto
+          - full
+          - module
+      module_path:
+        description: "Required when mode=module (e.g. modules/vpc)"
+        required: false
+        type: string
+      bypass_change_detection:
+        description: "Force full matrix regardless of detected changes"
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: validate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+  TF_CLI_ARGS_init: "-no-color -input=false -backend=false"
+  TF_CLI_ARGS_validate: "-no-color"
+  TF_PLUGIN_CACHE_DIR: "${{ github.workspace }}/.terraform.d/plugin-cache"
+  TOOL_VERSIONS_FILE: "tooling/.tool-versions"
+  TERRAFORM_VERSION_FILE: "tooling/.terraform-version"
+  TFLINT_CONFIG: "tooling/.tflint.hcl"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  repo-baseline:
+    name: Repo baseline checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      go_version: ${{ steps.validate-outputs.outputs.go }}
+      terraform_version: ${{ steps.validate-outputs.outputs.terraform }}
+      python_version: ${{ steps.validate-outputs.outputs.python }}
+      tflint_version: ${{ steps.validate-outputs.outputs.tflint }}
+      terraform_docs_version: ${{ steps.validate-outputs.outputs.terraform_docs }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@1044a6dea927916f2c38ba5aeffbc0a847b1221a  # v7.0.0
+
+      - name: Read canonical toolchain versions and verify mirrors
+        id: tool-versions
+        run: task verify:toolchain
+
+      - name: Validate output patterns (Sanitization against Injection)
+        id: validate-outputs
+        run: |
+          task verify:outputs \
+            GO_VERSION="${{ steps.tool-versions.outputs.go }}" \
+            TERRAFORM_VERSION="${{ steps.tool-versions.outputs.terraform }}" \
+            PYTHON_VERSION="${{ steps.tool-versions.outputs.python }}" \
+            TFLINT_VERSION="${{ steps.tool-versions.outputs.tflint }}" \
+            TERRAFORM_DOCS_VERSION="${{ steps.tool-versions.outputs.terraform_docs }}"
+
+      - name: Setup Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+        with:
+          python-version: ${{ steps.tool-versions.outputs.python }}
+          cache: pip
+
+      - name: Run repo-level pre-commit
+        uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd  # v3.0.1
+        with:
+          extra_args: --all-files --show-diff-on-failure
+
+  detect-changes:
+    name: Detect changed modules
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: repo-baseline
+    outputs:
+      matrix: ${{ steps.build-matrix.outputs.matrix }}
+      has_changes: ${{ steps.build-matrix.outputs.has_changes }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@1044a6dea927916f2c38ba5aeffbc0a847b1221a  # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Setup Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+        with:
+          python-version: ${{ needs.repo-baseline.outputs.python_version }}
+          cache: pip
+
+      - name: Detect shared validation triggers
+        id: shared-changes
+        run: |
+          set -euo pipefail
+          HEAD_REF="${{ github.sha }}"
+          EVENT_NAME="${{ github.event_name }}"
+
+          if [[ "${EVENT_NAME}" == "pull_request" && -n "${{ github.event.pull_request.base.sha }}" ]]; then
+            BASE_REF="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE_REF="${{ github.event.before }}"
+            if [[ "${BASE_REF}" == "0000000000000000000000000000000000000000" ]]; then BASE_REF="HEAD~1"; fi
+          fi
+
+          if [[ -z "${BASE_REF}" || "${BASE_REF}" == "null" ]]; then
+            BASE_REF="$(git rev-parse HEAD~1 || true)"
+          fi
+
+          echo "Base: ${BASE_REF}"
+          echo "Head: ${HEAD_REF}"
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            if [[ "${{ inputs.mode }}" == "full" || "${{ inputs.bypass_change_detection }}" == "true" ]]; then
+              echo "force_full_matrix=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+
+          if [[ -z "${BASE_REF}" ]]; then
+            echo "force_full_matrix=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if git diff --name-only "${BASE_REF}" "${HEAD_REF}" | grep -E -q \
+            '^(tooling/|scripts/|catalog/|docs/|catalog/modules\.yaml$|Makefile$|Taskfile\.yml$|justfile$|\.editorconfig$|\.terraform-docs\.yml$|\.pre-commit-config\.yaml$|go\.mod$|go\.sum$|^\.github/workflows/.*\.yml$)'; then
+            echo "force_full_matrix=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "force_full_matrix=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Detect changes
+        id: detect
+        run: |
+          set -euo pipefail
+          HEAD_REF="${{ github.sha }}"
+          EVENT_NAME="${{ github.event_name }}"
+
+          if [[ "${EVENT_NAME}" == "pull_request" && -n "${{ github.event.pull_request.base.sha }}" ]]; then
+            BASE_REF="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE_REF="${{ github.event.before }}"
+            if [[ "${BASE_REF}" == "0000000000000000000000000000000000000000" ]]; then BASE_REF="HEAD~1"; fi
+          fi
+
+          if [[ -z "${BASE_REF}" || "${BASE_REF}" == "null" ]]; then
+            BASE_REF="$(git rev-parse HEAD~1 || true)"
+          fi
+
+          echo "Base: ${BASE_REF}"
+          echo "Head: ${HEAD_REF}"
+
+          # Fail fast if change detection is broken; do not silently downgrade to [].
+          go run ./scripts/ci/detect-changes.go \
+            --base "${BASE_REF}" \
+            --head "${HEAD_REF}" > /tmp/changed-modules.json
+
+          cat /tmp/changed-modules.json
+
+      - name: Build matrix
+        id: build-matrix
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.mode }}" == "module" ]]; then
+            CLEANED_PATH="${{ inputs.module_path }}"
+            if [[ ! "$CLEANED_PATH" =~ ^modules/[a-zA-Z0-9_-]+$ ]]; then
+              echo "::error::Invalid module path pattern."
+              exit 1
+            fi
+            if [[ ! -d "$CLEANED_PATH" ]]; then
+              echo "::error::module_path '$CLEANED_PATH' does not exist"
+              exit 1
+            fi
+            jq -nc --arg p "$CLEANED_PATH" '
+              { include: [ { name: ($p|split("/")|last), path: $p } ] }
+            ' > /tmp/matrix.json
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            echo "matrix=$(jq -c . /tmp/matrix.json)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ "${{ steps.shared-changes.outputs.force_full_matrix }}" == "true" ]]; then
+            echo "Shared validation trigger detected; building full module matrix."
+
+            jq -nc '
+              {
+                include: [
+                  inputs
+                  | select(length > 0)
+                  | {
+                      name: (. | split("/") | last),
+                      path: .
+                    }
+                ]
+              }
+            ' < <(
+              find modules -mindepth 1 -maxdepth 1 -type d | sort
+            ) > /tmp/matrix.json
+          else
+            python3 ./scripts/ci/build-matrix.py \
+              --modules-root modules \
+              --changes-file /tmp/changed-modules.json \
+              --out /tmp/matrix.json
+          fi
+
+          echo "Generated matrix:"
+          cat /tmp/matrix.json
+
+          MATRIX_JSON="$(jq -c . /tmp/matrix.json)"
+          HAS_CHANGES=$(jq -r '.include | length > 0' /tmp/matrix.json)
+          echo "has_changes=${HAS_CHANGES}" >> "$GITHUB_OUTPUT"
+          echo "matrix=${MATRIX_JSON}" >> "$GITHUB_OUTPUT"
+
+  validate-modules:
+    name: Validate modules
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [repo-baseline, detect-changes]
+    if: needs.detect-changes.outputs.has_changes == 'true'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
+    permissions:
+      contents: read
+      pull-requests: read
+
+    defaults:
+      run:
+        working-directory: ${{ matrix.path }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@1044a6dea927916f2c38ba5aeffbc0a847b1221a  # v7.0.0
+
+      - name: Prepare Terraform plugin cache
+        run: mkdir -p "${TF_PLUGIN_CACHE_DIR}"
+
+      - name: Cache Terraform plugins and providers
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+          key: ${{ runner.os }}-tf-v3-${{ needs.repo-baseline.outputs.terraform_version }}-${{ hashFiles(format('{0}/.terraform.lock.hcl', matrix.path), 'tooling/.terraform-version', 'tooling/.tool-versions') }}
+          restore-keys: |
+            ${{ runner.os }}-tf-v3-${{ needs.repo-baseline.outputs.terraform_version }}-
+
+      - name: Setup Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify Go module integrity
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          go mod verify
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e  # v4.0.1
+        with:
+          terraform_version: ${{ needs.repo-baseline.outputs.terraform_version }}
+          terraform_wrapper: false
+
+      - name: Setup Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+        with:
+          python-version: ${{ needs.repo-baseline.outputs.python_version }}
+          cache: pip
+
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@6e1e0642c0289bd619021bf6b34e3c08ed1e005a  # v6.3.0
+        with:
+          tflint_version: ${{ needs.repo-baseline.outputs.tflint_version }}
+
+      - name: Install terraform-docs CLI
+        run: |
+          set -euo pipefail
+
+          VERSION="${{ needs.repo-baseline.outputs.terraform_docs_version }}"
+          BIN_DIR="${HOME}/.local/bin"
+          RELEASE_BASE_URL="https://github.com/terraform-docs/terraform-docs/releases/download/v${VERSION}"
+          ARCHIVE_NAME="terraform-docs-v${VERSION}-linux-amd64.tar.gz"
+          ARCHIVE_PATH="/tmp/${ARCHIVE_NAME}"
+          CHECKSUM_FILE="/tmp/terraform-docs-v${VERSION}.sha256sum"
+
+          mkdir -p "${BIN_DIR}"
+
+          curl -fsSL "${RELEASE_BASE_URL}/${ARCHIVE_NAME}" -o "${ARCHIVE_PATH}"
+          curl -fsSL "${RELEASE_BASE_URL}/terraform-docs-v${VERSION}.sha256sum" -o "${CHECKSUM_FILE}"
+
+          EXPECTED_SUM="$(
+            awk -v file="${ARCHIVE_NAME}" '
+              $0 ~ file { print $1; found=1; exit }
+              END { if (!found) exit 1 }
+            ' "${CHECKSUM_FILE}"
+          )"
+
+          if [[ -z "${EXPECTED_SUM}" ]]; then
+            echo "::error::Unable to find checksum for ${ARCHIVE_NAME} in ${CHECKSUM_FILE}"
+            exit 1
+          fi
+
+          echo "${EXPECTED_SUM}  ${ARCHIVE_PATH}" | sha256sum --check --status
+
+          tar -xzf "${ARCHIVE_PATH}" -C /tmp
+          install -m 0755 /tmp/terraform-docs "${BIN_DIR}/terraform-docs"
+          echo "${BIN_DIR}" >> "${GITHUB_PATH}"
+
+      - name: Terraform FMT check
+        run: terraform fmt -check -recursive
+
+      - name: Ensure lockfile exists
+        run: |
+          set -euo pipefail
+          if [[ ! -f ".terraform.lock.hcl" ]]; then
+            echo "::error file=${{ matrix.path }}/.terraform.lock.hcl::Missing lockfile. Policy requires committed lockfile for deterministic provider resolution."
+            exit 1
+          fi
+
+      - name: Terraform Init (no backend, lockfile readonly)
+        run: terraform init -lockfile=readonly
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: Examples contract check
+        run: |
+          set -euo pipefail
+          if [[ -d "examples" ]]; then
+            if [[ ! -f "examples/basic/main.tf" ]]; then
+              echo "::error file=${{ matrix.path }}/examples/basic/main.tf::Missing required examples/basic/main.tf"
+              exit 1
+            fi
+          fi
+
+      - name: Terraform tests (tftest.hcl)
+        run: |
+          set -euo pipefail
+          if find tests -type f -name "*.tftest.hcl" | grep -q . || [[ -f "tests/tftest.hcl" ]]; then
+            terraform test -no-color
+          fi
+
+      - name: Cache TFLint plugins
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ~/.tflint.d/plugins
+          key: ${{ runner.os }}-tflint-plugins-v1-${{ needs.repo-baseline.outputs.tflint_version }}
+
+      - name: TFLint init
+        run: tflint --init --config "${GITHUB_WORKSPACE}/${{ env.TFLINT_CONFIG }}"
+
+      - name: TFLint scan
+        run: tflint --config "${GITHUB_WORKSPACE}/${{ env.TFLINT_CONFIG }}"
+
+      - name: Terraform Docs check (In-place check)
+        run: terraform-docs --config "${GITHUB_WORKSPACE}/.terraform-docs.yml" . --check
+
+      - name: Upload Lockfile for analysis
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: lockfile-${{ matrix.name }}
+          path: |
+            ${{ matrix.path }}/.terraform.lock.hcl
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## ✅ Module Validation"
+            echo "- Module: \`${{ matrix.name }}\`"
+            echo "- Path: \`${{ matrix.path }}\`"
+            echo "- Commit: \`${{ github.sha }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  fallback-validate-all:
+    name: No module changes fallback
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [repo-baseline, detect-changes]
+    permissions:
+      contents: read
+    if: needs.detect-changes.outputs.has_changes != 'true'
+    steps:
+      - name: Summary
+        run: |
+          {
+            echo "## ℹ️ Validation Fallback"
+            echo "No module-scoped or shared validation-trigger changes detected; executed repository-wide baseline checks only."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  all-validate-chacks-pass:
+    name: CI gate (all checks passed)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [repo-baseline, detect-changes, validate-modules, fallback-validate-all]
+    if: always()
+    steps:
+      - name: Check all jobs
+        run: |
+          results='${{ toJson(needs) }}'
+          for job in repo-baseline detect-changes validate-modules fallback-validate-all; do
+            result=$(echo "$results" | jq -r --arg j "$job" '.[$j].result')
+            if [[ "$result" != "success" && "$result" != "skipped" ]]; then
+              echo "::error::Job '$job' did not pass (result: $result)"
+              exit 1
+            fi
+          done
+          echo "All required jobs passed or were skipped."

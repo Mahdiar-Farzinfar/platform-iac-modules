@@ -1,0 +1,594 @@
+---
+name: release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: {}
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DEFAULT_BRANCH: main
+  IMAGE_NAME_DEVCONTAINER: ghcr.io/${{ github.repository }}/devcontainer
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  discover:
+    name: Discover release domains
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      domains: ${{ steps.discover.outputs.domains }}
+      has_domains: ${{ steps.discover.outputs.has_domains }}
+      commit_range: ${{ steps.range.outputs.commit_range }}
+    steps:
+      - name: Enforce default branch
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_REF_TYPE}" != "branch" || "${GITHUB_REF_NAME}" != "${DEFAULT_BRANCH}" ]]; then
+            echo "This workflow is only allowed on branch '${DEFAULT_BRANCH}', current ref is '${GITHUB_REF}'."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@1044a6dea927916f2c38ba5aeffbc0a847b1221a  # v7.0.0
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: Compute commit range
+        id: range
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            base_commit="$(git rev-list --max-count=1 HEAD^ 2>/dev/null || true)"
+            if [[ -z "${base_commit}" ]]; then
+              base_commit="$(git rev-list --max-parents=0 HEAD)"
+            fi
+            echo "commit_range=${base_commit}..${GITHUB_SHA}" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          before="${{ github.event.before }}"
+          if [[ -z "${before}" || "${before}" == "0000000000000000000000000000000000000000" ]]; then
+            before="$(git rev-list --max-count=1 HEAD^ 2>/dev/null || true)"
+          fi
+          if [[ -z "${before}" ]]; then
+            before="$(git rev-list --max-parents=0 HEAD)"
+          fi
+
+          echo "commit_range=${before}..${GITHUB_SHA}" >> "${GITHUB_OUTPUT}"
+
+      - name: Detect changed release domains
+        id: discover
+        run: |
+          set -euo pipefail
+
+          range="${{ steps.range.outputs.commit_range }}"
+          echo "Using commit range: ${range}"
+
+          mapfile -t changed_files < <(git diff --name-only "${range}" | sed '/^$/d' | sort -u)
+
+          if [[ ${#changed_files[@]} -eq 0 ]]; then
+            echo 'domains=[]' >> "${GITHUB_OUTPUT}"
+            echo 'has_domains=false' >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          declare -A domains=()
+
+          for file in "${changed_files[@]}"; do
+            case "${file}" in
+              modules/*/*)
+                module_name="$(echo "${file}" | cut -d/ -f2)"
+                domains["module/${module_name}"]=1
+                ;;
+              .devcontainer/*|docker-compose.dev.yml)
+                domains["image/devcontainer"]=1
+                ;;
+              modules/README.md)
+                domains["root"]=1
+                ;;
+              .github/*|docs/*|scripts/*|tooling/*|catalog/*|tests/*|README.md|SECURITY.md|CONTRIBUTING.md|CODE_OF_CONDUCT.md|CHANGELOG.md|LICENSE|go.mod|go.sum|.gitignore|.editorconfig|.pre-commit-config.yaml|.terraform-docs.yml|Taskfile.yml|justfile|Makefile)
+                domains["root"]=1
+                ;;
+            esac
+          done
+
+          if [[ ${#domains[@]} -eq 0 ]]; then
+            echo 'domains=[]' >> "${GITHUB_OUTPUT}"
+            echo 'has_domains=false' >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          json="$(
+            printf '%s\n' "${!domains[@]}" \
+            | sort \
+            | jq -R . \
+            | jq -cs '
+                map(
+                  if . == "root" then
+                    {
+                      domain: .,
+                      kind: "root",
+                      name: "root",
+                      path: ".",
+                      tag_prefix: "root/v"
+                    }
+                  elif startswith("module/") then
+                    {
+                      domain: .,
+                      kind: "module",
+                      name: (split("/")[1]),
+                      path: ("modules/" + (split("/")[1])),
+                      tag_prefix: (. + "/v")
+                    }
+                  elif startswith("image/") then
+                    {
+                      domain: .,
+                      kind: "image",
+                      name: (split("/")[1]),
+                      path: ".devcontainer",
+                      tag_prefix: (. + "/v")
+                    }
+                  else
+                    empty
+                  end
+                )
+              '
+          )"
+
+          echo "Detected domains: ${json}"
+          echo "domains=${json}" >> "${GITHUB_OUTPUT}"
+          echo 'has_domains=true' >> "${GITHUB_OUTPUT}"
+
+  prepare:
+    name: Prepare versions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    needs: discover
+    if: needs.discover.outputs.has_domains == 'true'
+    permissions:
+      contents: read
+    outputs:
+      releases: ${{ steps.prepare.outputs.releases }}
+      has_releases: ${{ steps.prepare.outputs.has_releases }}
+      image_release: ${{ steps.prepare.outputs.image_release }}
+      has_image_release: ${{ steps.prepare.outputs.has_image_release }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@1044a6dea927916f2c38ba5aeffbc0a847b1221a  # v7.0.0
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: Build release plan
+        id: prepare
+        env:
+          DOMAINS_JSON: ${{ needs.discover.outputs.domains }}
+          COMMIT_RANGE: ${{ needs.discover.outputs.commit_range }}
+        run: |
+          set -euo pipefail
+
+          tmp_domains="$(mktemp)"
+          tmp_releases="$(mktemp)"
+
+          echo "${DOMAINS_JSON}" > "${tmp_domains}"
+          echo '[]' > "${tmp_releases}"
+
+          root_commit="$(git rev-list --max-parents=0 HEAD | tail -n1)"
+
+          semver_bump() {
+            local current="$1"
+            local level="$2"
+            local major minor patch
+            IFS='.' read -r major minor patch <<< "${current}"
+
+            case "${level}" in
+              major) echo "$((major + 1)).0.0" ;;
+              minor) echo "${major}.$((minor + 1)).0" ;;
+              patch) echo "${major}.${minor}.$((patch + 1))" ;;
+              *) echo "${current}" ;;
+            esac
+          }
+
+          bump_rank() {
+            case "$1" in
+              none) echo 0 ;;
+              patch) echo 1 ;;
+              minor) echo 2 ;;
+              major) echo 3 ;;
+              *) echo 0 ;;
+            esac
+          }
+
+          detect_bump_from_messages() {
+            local messages="$1"
+            local best="none"
+
+            while IFS= read -r line; do
+              [[ -z "${line}" ]] && continue
+
+              if [[ "${line}" =~ BREAKING[[:space:]]CHANGE: ]] || [[ "${line}" =~ ^[a-zA-Z0-9_-]+(\([^)]+\))?!: ]]; then
+                best="major"
+                break
+              elif [[ "${line}" =~ ^feat(\([^)]+\))?: ]]; then
+                if [[ "$(bump_rank "${best}")" -lt 2 ]]; then
+                  best="minor"
+                fi
+              elif [[ "${line}" =~ ^(fix|perf|refactor|revert|security)(\([^)]+\))?: ]]; then
+                if [[ "$(bump_rank "${best}")" -lt 1 ]]; then
+                  best="patch"
+                fi
+              fi
+            done <<< "${messages}"
+
+            echo "${best}"
+          }
+
+          while IFS= read -r item; do
+            domain="$(jq -r '.domain' <<< "${item}")"
+            kind="$(jq -r '.kind' <<< "${item}")"
+            name="$(jq -r '.name' <<< "${item}")"
+            path="$(jq -r '.path' <<< "${item}")"
+            tag_prefix="$(jq -r '.tag_prefix' <<< "${item}")"
+
+            last_tag="$(git tag --list "${tag_prefix}*" --sort=-v:refname | head -n1 || true)"
+            if [[ -z "${last_tag}" ]]; then
+              current_version="0.0.0"
+            else
+              current_version="${last_tag##*/v}"
+            fi
+
+            if [[ "${kind}" == "root" ]]; then
+              mapfile -t commit_subjects < <(git log --format='%s' "${COMMIT_RANGE}" -- .)
+              mapfile -t commit_bodies < <(git log --format='%b' "${COMMIT_RANGE}" -- .)
+            else
+              mapfile -t commit_subjects < <(git log --format='%s' "${COMMIT_RANGE}" -- "${path}")
+              mapfile -t commit_bodies < <(git log --format='%b' "${COMMIT_RANGE}" -- "${path}")
+            fi
+
+            combined_messages="$(printf '%s\n' "${commit_subjects[@]}" "${commit_bodies[@]}" | sed '/^$/d' || true)"
+            if [[ -z "${combined_messages}" ]]; then
+              continue
+            fi
+
+            bump="$(detect_bump_from_messages "${combined_messages}")"
+            if [[ "${bump}" == "none" ]]; then
+              continue
+            fi
+
+            next_version="$(semver_bump "${current_version}" "${bump}")"
+
+            if [[ -n "${last_tag}" ]]; then
+              range="${last_tag}..HEAD"
+            else
+              range="${root_commit}..HEAD"
+            fi
+
+            tmp_log="$(mktemp)"
+            if [[ "${kind}" == "root" ]]; then
+              git log --format='- %s (%h)' "${range}" -- . > "${tmp_log}" || true
+            else
+              git log --format='- %s (%h)' "${range}" -- "${path}" > "${tmp_log}" || true
+            fi
+
+            if [[ ! -s "${tmp_log}" ]]; then
+              echo "- No user-facing changes." > "${tmp_log}"
+            fi
+
+            tmp_notes="$(mktemp)"
+            {
+              echo "## ${domain} v${next_version}"
+              echo
+              echo "### Changed"
+              cat "${tmp_log}"
+              echo
+            } > "${tmp_notes}"
+
+            notes_b64="$(base64 -w0 "${tmp_notes}")"
+            next_tag="${tag_prefix}${next_version}"
+
+            release_obj="$(
+              jq -n \
+                --arg domain "${domain}" \
+                --arg kind "${kind}" \
+                --arg name "${name}" \
+                --arg path "${path}" \
+                --arg tag_prefix "${tag_prefix}" \
+                --arg previous_tag "${last_tag}" \
+                --arg current_version "${current_version}" \
+                --arg bump "${bump}" \
+                --arg notes_b64 "${notes_b64}" \
+                --arg next_version "${next_version}" \
+                --arg next_tag "${next_tag}" \
+                '{
+                  domain: $domain,
+                  kind: $kind,
+                  name: $name,
+                  path: $path,
+                  tag_prefix: $tag_prefix,
+                  previous_tag: $previous_tag,
+                  current_version: $current_version,
+                  bump: $bump,
+                  notes_b64: $notes_b64,
+                  next_version: $next_version,
+                  next_tag: $next_tag
+                }'
+            )"
+
+            jq --argjson obj "${release_obj}" '. += [$obj]' "${tmp_releases}" > "${tmp_releases}.next"
+            mv "${tmp_releases}.next" "${tmp_releases}"
+          done < <(jq -c '.[]' "${tmp_domains}")
+
+          releases="$(cat "${tmp_releases}")"
+          echo "releases=${releases}" >> "${GITHUB_OUTPUT}"
+
+          if [[ "$(jq 'length' "${tmp_releases}")" -gt 0 ]]; then
+            echo 'has_releases=true' >> "${GITHUB_OUTPUT}"
+          else
+            echo 'has_releases=false' >> "${GITHUB_OUTPUT}"
+          fi
+
+          image_release="$(jq -c '[.[] | select(.kind == "image" and .name == "devcontainer")][0] // empty' "${tmp_releases}")"
+          if [[ -n "${image_release}" ]]; then
+            echo "image_release=${image_release}" >> "${GITHUB_OUTPUT}"
+            echo 'has_image_release=true' >> "${GITHUB_OUTPUT}"
+          else
+            echo 'image_release=' >> "${GITHUB_OUTPUT}"
+            echo 'has_image_release=false' >> "${GITHUB_OUTPUT}"
+          fi
+
+  release:
+    name: Release domains
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    needs:
+      - discover
+      - prepare
+    if: needs.prepare.outputs.has_releases == 'true'
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        release: ${{ fromJson(needs.prepare.outputs.releases) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@1044a6dea927916f2c38ba5aeffbc0a847b1221a  # v7.0.0
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: Refresh remote tags
+        run: |
+          set -euo pipefail
+          git fetch --force --tags origin
+
+      - name: Guard against existing tag
+        run: |
+          set -euo pipefail
+
+          tag_ref="refs/tags/${{ matrix.release.next_tag }}"
+          if git show-ref --tags --verify --quiet "${tag_ref}"; then
+            echo "Tag already exists: ${{ matrix.release.next_tag }}"
+            exit 1
+          fi
+
+      - name: Render release notes
+        if: matrix.release.kind != 'image'
+        run: |
+          set -euo pipefail
+          echo "${{ matrix.release.notes_b64 }}" | base64 -d > release-notes.md
+
+      - name: Create annotated tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git tag -a "${{ matrix.release.next_tag }}" -m "${{ matrix.release.domain }} ${{ matrix.release.next_version }}"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "refs/tags/${{ matrix.release.next_tag }}"
+
+      - name: Create GitHub release
+        if: matrix.release.kind != 'image'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          title="${{ matrix.release.domain }} v${{ matrix.release.next_version }}"
+
+          gh release create "${{ matrix.release.next_tag }}" \
+            --title "${title}" \
+            --notes-file release-notes.md
+
+  changelog:
+    name: Update changelog
+    runs-on: ubuntu-24.04
+    needs:
+      - prepare
+      - release
+    if: needs.prepare.outputs.has_releases == 'true' && needs.release.result == 'success'
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@1044a6dea927916f2c38ba5aeffbc0a847b1221a  # v7.0.0
+        with:
+          fetch-depth: 0
+          fetch-tags: false
+          persist-credentials: false
+
+      - name: Render changelog sections
+        id: sections
+        run: |
+          set -euo pipefail
+
+          releases='${{ needs.prepare.outputs.releases }}'
+          filtered="$(jq -c '[.[] | select(.kind != "image")]' <<< "${releases}")"
+
+          if [[ "$(jq 'length' <<< "${filtered}")" -eq 0 ]]; then
+            echo "file=" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          tmp_sections="$(mktemp)"
+          jq -c '.[]' <<< "${filtered}" | while read -r item; do
+            notes_b64="$(jq -r '.notes_b64' <<< "${item}")"
+            echo "${notes_b64}" | base64 -d >> "${tmp_sections}"
+            echo >> "${tmp_sections}"
+          done
+
+          echo "file=${tmp_sections}" >> "${GITHUB_OUTPUT}"
+
+      - name: Update CHANGELOG.md
+        if: steps.sections.outputs.file != ''
+        env:
+          BRANCH_NAME: automation/changelog-${{ github.run_id }}
+          SECTIONS_FILE: ${{ steps.sections.outputs.file }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! -f CHANGELOG.md ]]; then
+            printf '%s\n' \
+              '# Changelog' \
+              '' \
+              'All notable changes to this project will be documented in this file.' \
+              '' > CHANGELOG.md
+          fi
+
+          python <<'PY'
+          import os
+          from pathlib import Path
+
+          sections = Path(os.environ["SECTIONS_FILE"]).read_text().strip()
+          changelog_path = Path("CHANGELOG.md")
+          current = changelog_path.read_text()
+
+          if not current.startswith("# Changelog"):
+              current = "# Changelog\n\n" + current.lstrip()
+
+          idx = current.find("\n## ")
+          if idx == -1:
+              intro = current.rstrip() + "\n\n"
+              rest = ""
+          else:
+              intro = current[:idx].rstrip() + "\n\n"
+              rest = current[idx:].lstrip("\n")
+
+          new_text = intro + sections + "\n\n" + rest
+          changelog_path.write_text(new_text)
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+
+          if git diff --cached --quiet; then
+            echo "CHANGELOG.md already up to date."
+            exit 0
+          fi
+
+          git commit -m "docs(changelog): update automated release entries"
+          git switch -c "${BRANCH_NAME}"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "HEAD:${BRANCH_NAME}"
+
+      - name: Create pull request for CHANGELOG.md
+        if: steps.sections.outputs.file != ''
+        env:
+          BRANCH_NAME: automation/changelog-${{ github.run_id }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if ! git rev-parse --verify --quiet "HEAD" >/dev/null; then
+            echo "Repository state is invalid."
+            exit 1
+          fi
+
+          pr_title="docs(changelog): update automated release entries"
+
+          pr_body_file="$(mktemp)"
+          {
+            echo "## Summary"
+            echo
+            echo "- update \`CHANGELOG.md\` with generated entries from the latest release workflow"
+            echo "- keep release tagging and GitHub Releases automated"
+            echo "- require normal PR review/merge flow before changelog lands on \`${DEFAULT_BRANCH}\`"
+            echo
+            echo "## Notes"
+            echo
+            echo "- generated by workflow \`release\`"
+            echo "- source branch: \`${BRANCH_NAME}\`"
+          } > "${pr_body_file}"
+
+          gh pr create \
+            --base "${DEFAULT_BRANCH}" \
+            --head "${BRANCH_NAME}" \
+            --title "${pr_title}" \
+            --body-file "${pr_body_file}"
+
+  all-checks:
+    name: All checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    needs:
+      - discover
+      - prepare
+      - release
+      - changelog
+    if: always()
+    permissions: {}
+    steps:
+      - name: Verify all jobs succeeded
+        run: |
+          set -euo pipefail
+
+          results=(
+            "discover=${{ needs.discover.result }}"
+            "prepare=${{ needs.prepare.result }}"
+            "release=${{ needs.release.result }}"
+            "changelog=${{ needs.changelog.result }}"
+          )
+
+          failed=false
+          for entry in "${results[@]}"; do
+            name="${entry%%=*}"
+            result="${entry#*=}"
+            case "${result}" in
+              success|skipped)
+                echo "OK: ${name} -> ${result}"
+                ;;
+              *)
+                echo "FAIL: ${name} -> ${result}"
+                failed=true
+                ;;
+            esac
+          done
+
+          if [[ "${failed}" == "true" ]]; then
+            exit 1
+          fi
