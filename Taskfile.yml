@@ -1,0 +1,564 @@
+---
+version: "3"
+
+silent: false
+
+vars:
+  ROOT_DIR: "{{.TASKFILE_DIR}}"
+  MODULES_DIR: "{{.ROOT_DIR}}/modules"
+  TOOLING_DIR: "{{.ROOT_DIR}}/tooling"
+  SCRIPTS_DIR: "{{.ROOT_DIR}}/scripts"
+  BOOTSTRAP_DIR: "{{.SCRIPTS_DIR}}/bootstrap"
+  TOOLS_DIR: "{{.SCRIPTS_DIR}}/tools"
+  CI_DIR: "{{.SCRIPTS_DIR}}/ci"
+  WINDOWS_SCRIPTS_DIR: "{{.SCRIPTS_DIR}}/windows"
+  WINDOWS_TASKS_SCRIPT: "{{.WINDOWS_SCRIPTS_DIR}}/tasks.ps1"
+  VERIFY_TOOLCHAIN_SCRIPT: "{{.TOOLS_DIR}}/verify-toolchain.py"
+  VALIDATE_OUTPUTS_SCRIPT: "{{.TOOLS_DIR}}/validate-outputs.py"
+  TESTS_XPLAT_DIR: "{{.ROOT_DIR}}/tests/cross-platform"
+  GO_MOD_FILE: "{{.ROOT_DIR}}/go.mod"
+  TERRAFORM_VERSION_FILE: "{{.TOOLING_DIR}}/.terraform-version"
+  TOOL_VERSIONS_FILE: "{{.TOOLING_DIR}}/.tool-versions"
+  GO_TEST_TIMEOUT: "30m"
+  TF_IN_AUTOMATION: "true"
+  OS: '{{default .OS OS}}'
+  IS_WINDOWS: '{{eq (default .OS OS) "windows"}}'
+  IS_LINUX: '{{eq (default .OS OS) "linux"}}'
+  IS_DARWIN: '{{eq (default .OS OS) "darwin"}}'
+
+env:
+  TF_IN_AUTOMATION: "{{.TF_IN_AUTOMATION}}"
+  TF_INPUT: "false"
+  CHECKPOINT_DISABLE: "1"
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: "utf-8"
+
+tasks:
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list
+    silent: true
+
+  # -----------------------------
+  # Bootstrap / Preflight
+  # -----------------------------
+  preflight:
+    desc: Verify environment and required tools
+    cmds:
+      - task: preflight:windows
+      - task: preflight:posix
+
+  preflight:windows:
+    internal: true
+    platforms: [windows]
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File "{{.WINDOWS_TASKS_SCRIPT}}" -Task preflight -RootDir "{{.ROOT_DIR}}" -GoModFile "{{.GO_MOD_FILE}}" -TerraformVersionFile "{{.TERRAFORM_VERSION_FILE}}" -ToolVersionsFile "{{.TOOL_VERSIONS_FILE}}" -ToolsDir "{{.TOOLS_DIR}}"
+
+  preflight:posix:
+    internal: true
+    platforms: [linux, darwin]
+    cmds:
+      - test -f "{{.GO_MOD_FILE}}"
+      - test -f "{{.TERRAFORM_VERSION_FILE}}"
+      - test -f "{{.TOOL_VERSIONS_FILE}}"
+      - task: verify:toolchain
+      - 'echo "Terraform version source-of-truth: $(cat "{{.TERRAFORM_VERSION_FILE}}")"'
+      - grep -E "^go[[:space:]]+[0-9]+\.[0-9]+" "{{.GO_MOD_FILE}}"
+      - grep -E "^(terraform|tflint|tfsec|golangci-lint)[[:space:]]+" "{{.TOOL_VERSIONS_FILE}}"
+      - python3 "{{.TOOLS_DIR}}/verify-env.py" --root "{{.ROOT_DIR}}" --strict
+
+  verify:toolchain:
+    desc: Verify canonical toolchain versions and compatibility mirrors
+    deps:
+      - verify:toolchain:script
+
+  verify:toolchain:script:
+    internal: true
+    cmds:
+      - '{{if .IS_WINDOWS}}python{{else}}python3{{end}} "{{.VERIFY_TOOLCHAIN_SCRIPT}}" --root "{{.ROOT_DIR}}" --tool-versions-file "{{.TOOL_VERSIONS_FILE}}" --terraform-version-file "{{.TERRAFORM_VERSION_FILE}}" --go-mod-file "{{.GO_MOD_FILE}}"'
+
+  verify:outputs:
+    desc: Validate output patterns to prevent injection (Sanitization)
+    deps:
+      - verify:outputs:script
+
+  verify:outputs:script:
+    internal: true
+    cmds:
+      - |
+        {{if .IS_WINDOWS}}python{{else}}python3{{end}} "{{.VALIDATE_OUTPUTS_SCRIPT}}" \
+          --root "{{.ROOT_DIR}}" \
+          --go-mod-file "{{.GO_MOD_FILE}}" \
+          --terraform-version-file "{{.TERRAFORM_VERSION_FILE}}" \
+          --tool-versions-file "{{.TOOL_VERSIONS_FILE}}"
+
+  bootstrap:
+    desc: Bootstrap local dev environment (tool installer)
+    cmds:
+      - |
+        {{if .IS_WINDOWS}}
+        go run "{{.TOOLS_DIR}}/install-tools-windows.go" --root "{{.ROOT_DIR}}"
+        {{else if or .IS_LINUX .IS_DARWIN}}
+        go run "{{.TOOLS_DIR}}/install-tools-posix.go" --root "{{.ROOT_DIR}}"
+        {{else}}
+        echo "Unsupported operating system: {{.OS}}" && exit 1
+        {{end}}
+
+  bootstrap:posix:
+    desc: Bootstrap on Linux/macOS
+    platforms: [linux, darwin]
+    cmds:
+      - sh "{{.BOOTSTRAP_DIR}}/setup.sh"
+
+  bootstrap:windows:
+    desc: Bootstrap on Windows
+    platforms: [windows]
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File "{{.BOOTSTRAP_DIR}}/setup.ps1" {{.CLI_ARGS | default "--plan"}}
+
+  init:
+    desc: Initialize Terraform working directories for all modules
+    deps: [preflight]
+    cmds:
+      - task: init:windows
+      - task: init:posix
+
+  init:windows:
+    internal: true
+    platforms: [windows]
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File "{{.WINDOWS_TASKS_SCRIPT}}" -Task init -ModulesDir "{{.MODULES_DIR}}"
+
+  init:posix:
+    internal: true
+    platforms: [linux, darwin]
+    cmds:
+      - |
+        set -euo pipefail
+        modules_dir='{{.MODULES_DIR}}'
+        tmpfile="$(mktemp)"
+        trap 'rm -f "$tmpfile"' EXIT
+        find "$modules_dir" -type f -name 'main.tf' ! -path '*/.terraform/*' -exec dirname {} \; \
+          | sort -u > "$tmpfile"
+        while IFS= read -r module_path; do
+          [ -n "$module_path" ] || continue
+          echo "==> terraform init: ${module_path}"
+          terraform -chdir="${module_path}" init -backend=false -upgrade
+        done < "$tmpfile"
+
+  # -----------------------------
+  # OS/Cross-platform tests
+  # -----------------------------
+  os:detect:
+    desc: Print detected OS/arch
+    cmds:
+      - '{{if .IS_WINDOWS}}python "{{.CI_DIR}}/build-matrix.py" --mode print-env{{else}}python3 "{{.CI_DIR}}/build-matrix.py" --mode print-env{{end}}'
+
+  ci:changed:
+    desc: Detect changed modules/files for selective CI
+    cmds:
+      - go run "{{.CI_DIR}}/detect-changes.go" --modules-dir "{{.MODULES_DIR}}"
+
+  test:cross-platform:
+    desc: Run OS-specific cross-platform tests (native per platform)
+    deps:
+      - test:cross-platform:linux
+      - test:cross-platform:macos
+      - test:cross-platform:windows
+
+  test:cross-platform:linux:
+    desc: Run Linux cross-platform test suite
+    platforms: [linux]
+    cmds:
+      - sh "{{.TESTS_XPLAT_DIR}}/test-linux.sh"
+
+  test:cross-platform:macos:
+    desc: Run macOS cross-platform test suite
+    platforms: [darwin]
+    cmds:
+      - sh "{{.TESTS_XPLAT_DIR}}/test-macos.sh"
+
+  test:cross-platform:windows:
+    desc: Run Windows cross-platform test suite
+    platforms: [windows]
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File "{{.WINDOWS_TASKS_SCRIPT}}" -Task test-cross-platform -RootDir "{{.ROOT_DIR}}"
+
+  # -----------------------------
+  # Formatting
+  # -----------------------------
+  fmt:terraform:
+    desc: Format Terraform files
+    cmds:
+      - terraform fmt -recursive -diff
+
+  fmt:go:
+    desc: Format Go files (cross-platform, skip if none)
+    deps:
+      - fmt:go:posix
+      - fmt:go:windows
+
+  fmt:go:posix:
+    internal: true
+    platforms: [linux, darwin]
+    cmds:
+      - sh -c 'files=$(find "{{.ROOT_DIR}}" -type f -name "*.go" ! -path "*/vendor/*"); if [ -z "$files" ]; then echo "No Go files detected. Skipping gofmt."; exit 0; fi; echo "$files" | xargs gofmt -w'
+
+  fmt:go:windows:
+    internal: true
+    platforms: [windows]
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File "{{.WINDOWS_TASKS_SCRIPT}}" -Task fmt-go -RootDir "{{.ROOT_DIR}}"
+
+  fmt:shell:
+    desc: Format shell scripts (POSIX only)
+    platforms: [linux, darwin]
+    cmds:
+      - shfmt -w -i 2 -ci .
+
+  fmt:shell:windows:
+    desc: Skip shell formatting on Windows
+    platforms: [windows]
+    cmds:
+      - powershell -NoProfile -Command "Write-Host 'fmt:shell skipped on Windows (POSIX shell formatter).'"
+
+  fmt:
+    desc: Run all formatters
+    deps:
+      - fmt:terraform
+      - fmt:go
+      - fmt:shell
+      - fmt:shell:windows
+
+  # -----------------------------
+  # Validation / Lint
+  # -----------------------------
+  validate:terraform:
+    desc: Validate Terraform modules
+    deps: [preflight, init]
+    cmds:
+      - task: validate:terraform:windows
+      - task: validate:terraform:posix
+
+  validate:terraform:windows:
+    internal: true
+    platforms: [windows]
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File "{{.WINDOWS_TASKS_SCRIPT}}" -Task validate-terraform -ModulesDir "{{.MODULES_DIR}}"
+
+  validate:terraform:posix:
+    internal: true
+    platforms: [linux, darwin]
+    cmds:
+      - |
+        set -euo pipefail
+        find "{{.MODULES_DIR}}" -type f -name 'main.tf' ! -path '*/.terraform/*' -printf '%h\n' \
+          | sort -u \
+          | while IFS= read -r module_path; do
+              echo "==> terraform validate: ${module_path}"
+              terraform -chdir="${module_path}" init -backend=false -upgrade
+              terraform -chdir="${module_path}" validate
+            done
+
+  lint:tflint:
+    desc: Run TFLint for each module
+    deps: [preflight]
+    cmds:
+      - task: lint:tflint:windows
+      - task: lint:tflint:posix
+
+  lint:tflint:windows:
+    internal: true
+    platforms: [windows]
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File "{{.WINDOWS_TASKS_SCRIPT}}" -Task lint-tflint -ModulesDir "{{.MODULES_DIR}}" -ConfigPath "{{.TOOLING_DIR}}/.tflint.hcl"
+
+  lint:tflint:posix:
+    internal: true
+    platforms: [linux, darwin]
+    cmds:
+      - |
+        set -euo pipefail
+        find "{{.MODULES_DIR}}" -type f -name 'main.tf' ! -path '*/.terraform/*' -printf '%h\n' \
+          | sort -u \
+          | while IFS= read -r module_path; do
+              echo "==> tflint: ${module_path}"
+              tflint --init --config "{{.TOOLING_DIR}}/.tflint.hcl" --chdir "${module_path}"
+              tflint --config "{{.TOOLING_DIR}}/.tflint.hcl" --chdir "${module_path}"
+            done
+
+  lint:
+    desc: Run all lint/validate checks
+    deps:
+      - lint:yaml
+      - lint:md
+      - lint:actions
+      - validate:terraform
+      - validate:go
+      - lint:go
+      - lint:tflint
+
+  lint:yaml:
+    desc: Lint YAML files
+    deps: [preflight]
+    cmds:
+      - python -m yamllint -c tooling/.yamllint.yml .
+
+  lint:md:
+    desc: Lint Markdown files
+    deps: [preflight]
+    cmds:
+      - markdownlint-cli2 "**/*.md" "#node_modules"
+
+  lint:actions:
+    desc: Lint GitHub Actions workflows
+    deps: [preflight]
+    cmds:
+      - actionlint
+
+  validate:go:
+    desc: Run go vet (skip if no Go files)
+    deps:
+      - preflight
+      - validate:go:posix
+      - validate:go:windows
+
+  validate:go:posix:
+    internal: true
+    platforms: [linux, darwin]
+    cmds:
+      - sh -c 'if find "{{.ROOT_DIR}}" -type f -name "*.go" ! -path "*/vendor/*" | grep -q .; then go vet ./...; else echo "No Go files detected. Skipping go vet."; fi'
+
+  validate:go:windows:
+    internal: true
+    platforms: [windows]
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File "{{.WINDOWS_TASKS_SCRIPT}}" -Task validate-go -RootDir "{{.ROOT_DIR}}"
+
+  lint:go:
+    desc: Run golangci-lint (skip if no Go files)
+    deps:
+      - preflight
+      - lint:go:posix
+      - lint:go:windows
+
+  lint:go:posix:
+    internal: true
+    platforms: [linux, darwin]
+    cmds:
+      - sh -c 'if find "{{.ROOT_DIR}}" -type f -name "*.go" ! -path "*/vendor/*" | grep -q .; then golangci-lint run ./...; else echo "No Go files detected. Skipping golangci-lint."; fi'
+
+  lint:go:windows:
+    internal: true
+    platforms: [windows]
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File "{{.WINDOWS_TASKS_SCRIPT}}" -Task lint-go -RootDir "{{.ROOT_DIR}}"
+
+  # -----------------------------
+  # Security
+  # -----------------------------
+  security:
+    desc: Run security scans (Checkov, Trivy)
+    deps: [preflight]
+    cmds:
+      - checkov -d "{{.ROOT_DIR}}" --config-file "{{.TOOLING_DIR}}/.checkov.yml"
+      - trivy config "{{.ROOT_DIR}}" --exit-code 1 --ignorefile "{{.TOOLING_DIR}}/.trivyignore" --severity MEDIUM,HIGH,CRITICAL
+
+  security:gitleaks:
+    desc: Run secrets scan using gitleaks
+    deps: [preflight]
+    cmds:
+      - gitleaks detect --verbose --source "{{.ROOT_DIR}}" --no-git
+
+  security:all:
+    desc: Run all security scans (Checkov  Trivy  Tfsec  Gitleaks)
+    deps:
+      - security
+      - security:gitleaks
+
+  # -----------------------------
+  # Docs
+  # -----------------------------
+  docs:
+    desc: Generate terraform docs for all modules
+    deps: [preflight]
+    cmds:
+      - task: docs:windows
+      - task: docs:posix
+
+  docs:windows:
+    internal: true
+    platforms: [windows]
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File "{{.WINDOWS_TASKS_SCRIPT}}" -Task docs-generate -ModulesDir "{{.MODULES_DIR}}" -TerraformDocsConfig "{{.ROOT_DIR}}/.terraform-docs.yml"
+
+  docs:posix:
+    internal: true
+    platforms: [linux, darwin]
+    cmds:
+      - |
+        set -euo pipefail
+        find "{{.MODULES_DIR}}" -type f -name 'main.tf' ! -path '*/.terraform/*' -printf '%h\n' \
+          | sort -u \
+          | while IFS= read -r module_path; do
+              echo "==> terraform-docs: ${module_path}"
+              terraform-docs markdown table --config "{{.ROOT_DIR}}/.terraform-docs.yml" --output-file README.md --output-mode inject "${module_path}"
+            done
+
+  docs:check:
+    desc: Ensure docs are up-to-date (fails if git diff exists)
+    deps: [docs]
+    cmds:
+      - task: docs:check:windows
+      - task: docs:check:posix
+
+  docs:check:windows:
+    internal: true
+    platforms: [windows]
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File "{{.WINDOWS_TASKS_SCRIPT}}" -Task docs-check
+
+  docs:check:posix:
+    internal: true
+    platforms: [linux, darwin]
+    cmds:
+      - |
+        if ! git diff --quiet -- modules docs README.md; then
+          echo "Documentation is not up-to-date. Run: task docs"
+          git --no-pager diff -- modules docs README.md || true
+          exit 1
+        fi
+        echo "Documentation is up-to-date."
+
+  # -----------------------------
+  # Tests
+  # -----------------------------
+  test:terraform:
+    desc: Run terraform tests (tftest.hcl based)
+    deps: [preflight]
+    cmds:
+      - task: test:terraform:windows
+      - task: test:terraform:posix
+
+  test:terraform:windows:
+    internal: true
+    platforms: [windows]
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File "{{.WINDOWS_TASKS_SCRIPT}}" -Task test-terraform -ModulesDir "{{.MODULES_DIR}}"
+
+  test:terraform:posix:
+    internal: true
+    platforms: [linux, darwin]
+    cmds:
+      - |
+        set -euo pipefail
+        find "{{.MODULES_DIR}}" -type f -name 'main.tf' ! -path '*/.terraform/*' -printf '%h\n' \
+          | sort -u \
+          | while IFS= read -r module_path; do
+              if [ -f "${module_path}/tests/tftest.hcl" ]; then
+                echo "==> terraform test: ${module_path}"
+                terraform -chdir="${module_path}" test
+              fi
+            done
+
+  test:go:
+    desc: Run Go integration tests under modules/*/tests
+    deps:
+      - preflight
+      - test:go:posix
+      - test:go:windows
+
+  test:go:posix:
+    internal: true
+    platforms: [linux, darwin]
+    cmds:
+      - |
+        sh -c '
+          dirs=$(
+            find "{{.MODULES_DIR}}" -type f -name "integration-test.go" -exec dirname {} \; |
+            xargs -I{} dirname {} |
+            sort -u
+          )
+
+          if [ -z "$dirs" ]; then
+            echo "No integration-test.go files found. Skipping go test."
+            exit 0
+          fi
+
+          echo "==> running go test for module integration tests"
+
+          for d in $dirs; do
+            echo "==> go test: $d"
+            go test "./${d#{{.ROOT_DIR}}/}" -count=1 -timeout "{{.GO_TEST_TIMEOUT}}" -v
+          done
+        '
+
+  test:go:windows:
+    internal: true
+    platforms: [windows]
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File "{{.WINDOWS_TASKS_SCRIPT}}" -Task test-go -RootDir "{{.ROOT_DIR}}" -ModulesDir "{{.MODULES_DIR}}" -Timeout "{{.GO_TEST_TIMEOUT}}"
+
+  test:
+    desc: Run all tests
+    deps:
+      - test:terraform
+      - test:go
+      - test:smoke
+
+  test:smoke:
+    desc: Run smoke tests
+    deps:
+      - preflight
+      - test:smoke:posix
+      - test:smoke:windows
+
+  test:smoke:posix:
+    internal: true
+    platforms: [linux, darwin]
+    cmds:
+      - sh -c 'if command -v python3 >/dev/null 2>&1; then python3 "{{.ROOT_DIR}}/tests/smoke/run-smoke-tests.py"; elif command -v python >/dev/null 2>&1; then python "{{.ROOT_DIR}}/tests/smoke/run-smoke-tests.py"; else echo "Python not found (python3/python)"; exit 1; fi'
+
+  test:smoke:windows:
+    internal: true
+    platforms: [windows]
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File "{{.WINDOWS_TASKS_SCRIPT}}" -Task test-smoke -RootDir "{{.ROOT_DIR}}"
+
+  # -----------------------------
+  # Composite workflows
+  # -----------------------------
+  quick:
+    desc: Fast local loop (fmt  validate  docs)
+    deps:
+      - fmt
+      - validate:terraform
+      - docs
+
+  ci:
+    desc: CI-equivalent checks (no auto-fix)
+    deps:
+      - preflight
+      - ci:changed
+      - lint
+      - security:all
+      - test
+      - test:cross-platform
+      - docs:check
+
+  full:
+    desc: Full local pipeline (format  lint  security  tests  docs)
+    deps:
+      - fmt
+      - lint
+      - security:all
+      - test
+      - docs
+
+  release-check:
+    desc: Release gate checks for modules repository
+    deps:
+      - ci
+    cmds:
+      - echo "✅ Release checks passed."

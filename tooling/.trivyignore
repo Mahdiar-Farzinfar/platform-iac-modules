@@ -1,0 +1,32 @@
+# -----------------------------------------------------------------------------
+# Trivy Ignore File
+# Location: tooling/.trivyignore
+# Scope: IaC config scanning (trivy config)
+#
+# Policy:
+# - Ignore just for False Positive or Temporary Accepted Risk
+# - Every Ignore must have reason, owner, and expires
+# - Avoid using wildcard/ignore rules
+# -----------------------------------------------------------------------------
+
+# Format guideline:
+# <RULE_ID>[:<PATH_PATTERN>] # owner=<team|person> reason="<why>" expires=YYYY-MM-DD ticket=<id>
+
+# -----------------------------------------------------------------------------
+# EXAMPLES (UNCOMMENT ONLY IF NEEDED AND VALIDATED)
+# -----------------------------------------------------------------------------
+
+# Example: False-positive in test fixtures only
+# AVD-AWS-0132:modules/**/tests/** # owner=platform-security reason="Test-only fixture, no deploy path" expires=2026-12-31 ticket=SEC-1421
+
+# Example: Temporary risk acceptance for legacy module path
+# AVD-AWS-0089:modules/legacy-*/** # owner=cloud-platform reason="Legacy migration in progress; compensating controls enabled" expires=2026-10-15 ticket=RISK-778
+
+# Example: Ignore in examples only (never in production module root)
+# AVD-AWS-0107:modules/**/examples/** # owner=iac-core reason="Example code intentionally minimal; production baselines enforced in real usage" expires=2026-09-30 ticket=SEC-1550
+
+# -----------------------------------------------------------------------------
+# ACTIVE ENTRIES
+# -----------------------------------------------------------------------------
+# Intentionally empty by default.
+# Add approved exceptions below this line.

@@ -1,0 +1,46 @@
+---
+# tooling/cross-platform/pre-commit-hooks.yaml
+# Cross-platform local hook definitions for platform-iac-modules
+# Synced with scripts/bootstrap/setup.py capabilities (plan/apply only)
+# Compatible with pre-commit v3.7+ and Windows/Linux/macOS runners.
+
+minimum_pre_commit_version: "3.7.1"
+
+repos:
+  - repo: local
+    hooks:
+      - id: tooling-preflight
+        name: tooling preflight (setup.py plan, strict)
+        entry: python scripts/bootstrap/setup.py --plan --strict --non-interactive
+        language: system
+        pass_filenames: false
+        always_run: true
+        require_serial: true
+        stages: [pre-commit, pre-push]
+
+      - id: bootstrap-apply
+        name: bootstrap apply (non-interactive)
+        entry: python scripts/bootstrap/setup.py --apply --non-interactive
+        language: system
+        pass_filenames: false
+        always_run: false
+        require_serial: true
+        stages: [pre-commit]
+
+      - id: tooling-preflight-json
+        name: tooling preflight (json output)
+        entry: python scripts/bootstrap/setup.py --plan --strict --non-interactive --json
+        language: system
+        pass_filenames: false
+        always_run: false
+        require_serial: true
+        stages: [pre-push]
+
+      - id: tooling-verify-env-direct
+        name: tooling verify-env direct
+        entry: python scripts/tools/verify-env.py
+        language: system
+        pass_filenames: false
+        always_run: false
+        require_serial: true
+        stages: [pre-push]
