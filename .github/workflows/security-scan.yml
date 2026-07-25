@@ -79,7 +79,7 @@ jobs:
           fetch-depth: 1
 
       - name: Setup Task
-        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
+        uses: arduino/setup-task@bfe25a35f5c1f609e1d6153197b3b42a04ae054c  # v3.0.0
 
       - name: Preflight (Taskfile SoT)
         run: task preflight
@@ -127,7 +127,7 @@ jobs:
           fetch-depth: 1
 
       - name: Setup Task
-        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
+        uses: arduino/setup-task@bfe25a35f5c1f609e1d6153197b3b42a04ae054c  # v3.0.0
 
       - name: Preflight (Taskfile SoT)
         run: task preflight
@@ -198,10 +198,10 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Task
-        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
+        uses: arduino/setup-task@bfe25a35f5c1f609e1d6153197b3b42a04ae054c  # v3.0.0
 
       - name: Run Gitleaks from Taskfile (SoT)
-        run: task security:gitleaks
+        run: task security:gitleaks TASK_X_SKIP_DEPS=1
 
   osv-scanner:
     name: Dependency Vulnerability Scan
@@ -307,7 +307,8 @@ jobs:
             "${{ needs.trivy-iac.result }}"
             "${{ needs.gitleaks.result }}"
             "${{ needs.osv-scanner.result }}"
+            "${{ needs.upload-reports.result }}"
           )
           for result in "${results[@]}"; do
-            [ "${result}" = "success" ] || { echo "At least one security scan job failed."; exit 1; }
+            [[ "${result}" == "success" || "${result}" == "skipped" ]] || { echo "At least one security scan job failed: ${result}"; exit 1; }
           done

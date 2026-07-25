@@ -103,6 +103,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@1044a6dea927916f2c38ba5aeffbc0a847b1221a  # v7.0.0
 
+      - name: Install Task
+        uses: arduino/setup-task@bfe25a35f5c1f609e1d6153197b3b42a04ae054c  # v3.0.0
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Read canonical toolchain versions and verify mirrors
         id: tool-versions
         run: task verify:toolchain

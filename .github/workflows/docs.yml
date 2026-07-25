@@ -115,7 +115,7 @@ jobs:
           install -m 0755 terraform-docs "${install_dir}/terraform-docs"
 
           echo "${install_dir}" >> "${GITHUB_PATH}"
-          terraform-docs --version
+          "${install_dir}/terraform-docs" --version
 
       - name: "Generate documentation"
         run: task docs
@@ -224,7 +224,7 @@ jobs:
           install -m 0755 terraform-docs "${install_dir}/terraform-docs"
 
           echo "${install_dir}" >> "${GITHUB_PATH}"
-          terraform-docs --version
+          "${install_dir}/terraform-docs" --version
 
       - name: "Generate documentation"
         run: task docs

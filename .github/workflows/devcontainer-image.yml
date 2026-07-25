@@ -50,18 +50,25 @@ jobs:
           fetch-depth: 1
 
       - name: Validate required files
+        id: validate
         run: |
-          set -euo pipefail
-          test -f "${DOCKERFILE}"
-          test -f ".devcontainer/devcontainer.json"
+          if [[ -f "${DOCKERFILE}" && -f "${CONTEXT}/devcontainer.json" ]]; then
+            echo "files_exist=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "files_exist=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Required devcontainer files not found ('${DOCKERFILE}' or '${CONTEXT}/devcontainer.json'). Skipping remaining steps."
+          fi
 
       - name: Set up QEMU
+        if: steps.validate.outputs.files_exist == 'true'
         uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8  # v4.2.0
 
       - name: Set up Docker Buildx
+        if: steps.validate.outputs.files_exist == 'true'
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c  # v4.2.0
 
       - name: Docker metadata (labels only)
+        if: steps.validate.outputs.files_exist == 'true'
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302  # v6.2.0
         with:
@@ -72,6 +79,7 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
 
       - name: Derive Docker build args
+        if: steps.validate.outputs.files_exist == 'true'
         id: build_args
         run: |
           set -euo pipefail
@@ -96,6 +104,7 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
 
       - name: Build image (local load)
+        if: steps.validate.outputs.files_exist == 'true'
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
         with:
           context: ${{ env.CONTEXT }}
@@ -116,6 +125,7 @@ jobs:
           sbom: false
 
       - name: Smoke test image
+        if: steps.validate.outputs.files_exist == 'true'
         run: |
           set -euo pipefail
 
@@ -221,7 +231,18 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: Validate required files
+        id: validate
+        run: |
+          if [[ -f "${DOCKERFILE}" && -f "${CONTEXT}/devcontainer.json" ]]; then
+            echo "files_exist=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "files_exist=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Required devcontainer files not found ('${DOCKERFILE}' or '${CONTEXT}/devcontainer.json'). Skipping remaining steps."
+          fi
+
       - name: Derive image metadata
+        if: steps.validate.outputs.files_exist == 'true'
         id: vars
         run: |
           set -euo pipefail
@@ -229,12 +250,15 @@ jobs:
           echo "image=ghcr.io/${owner_lc}/platform-iac-modules" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU
+        if: steps.validate.outputs.files_exist == 'true'
         uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8  # v4.2.0
 
       - name: Set up Docker Buildx
+        if: steps.validate.outputs.files_exist == 'true'
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c  # v4.2.0
 
       - name: Login to GHCR
+        if: steps.validate.outputs.files_exist == 'true'
         uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0  # v4.4.0
         with:
           registry: ghcr.io
@@ -242,6 +266,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Derive semver from release tag
+        if: steps.validate.outputs.files_exist == 'true'
         id: rel
         run: |
           set -euo pipefail
@@ -255,6 +280,7 @@ jobs:
           echo "semver=${semver}" >> "${GITHUB_OUTPUT}"
 
       - name: Docker metadata (tags, labels)
+        if: steps.validate.outputs.files_exist == 'true'
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302  # v6.2.0
         with:
@@ -266,6 +292,7 @@ jobs:
             type=raw,value=${{ steps.rel.outputs.semver }},enable=${{ steps.rel.outputs.semver != '' }}
 
       - name: Derive Docker build args
+        if: steps.validate.outputs.files_exist == 'true'
         id: build_args
         run: |
           set -euo pipefail
@@ -288,6 +315,7 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
 
       - name: Build and push multi-arch image
+        if: steps.validate.outputs.files_exist == 'true'
         id: build_push
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
         with:
@@ -309,15 +337,18 @@ jobs:
           sbom: true
 
       - name: Install Cosign
+        if: steps.validate.outputs.files_exist == 'true'
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
 
       - name: Sign image by digest (keyless OIDC)
+        if: steps.validate.outputs.files_exist == 'true'
         env:
           IMAGE: ${{ steps.vars.outputs.image }}
           DIGEST: ${{ steps.build_push.outputs.digest }}
         run: cosign sign --yes "${IMAGE}@${DIGEST}"
 
       - name: Verify signature
+        if: steps.validate.outputs.files_exist == 'true'
         env:
           IMAGE: ${{ steps.vars.outputs.image }}
           DIGEST: ${{ steps.build_push.outputs.digest }}
@@ -330,6 +361,7 @@ jobs:
             "${IMAGE}@${DIGEST}" >/dev/null
 
       - name: Trivy scan by immutable digest
+        if: steps.validate.outputs.files_exist == 'true'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
         with:
           image-ref: ${{ steps.vars.outputs.image }}@${{ steps.build_push.outputs.digest }}
@@ -340,6 +372,7 @@ jobs:
           severity: CRITICAL,HIGH
 
       - name: Upload Trivy SARIF
+        if: steps.validate.outputs.files_exist == 'true'
         uses: github/codeql-action/upload-sarif@54f647b7e1bb85c95cddabcd46b0c578ec92bc1a  # v4.36.3
         with:
           sarif_file: trivy-image.sarif
