@@ -130,21 +130,13 @@ jobs:
 
       - name: Resolve Python version from .tool-versions
         id: python
-        shell: pwsh
+        shell: bash
         run: |
-          $ErrorActionPreference = 'Stop'
-
-          if (-not (Test-Path '.tool-versions')) {
-            throw 'ERROR: .tool-versions not found'
-          }
-
-          $line = Select-String -Path '.tool-versions' -Pattern '^\s*python\s+(\S+)\s*$' | Select-Object -First 1
-          if (-not $line) {
-            throw 'ERROR: python version not found in .tool-versions'
-          }
-
-          $version = $line.Matches[0].Groups[1].Value
-          "version=$version" >> $env:GITHUB_OUTPUT
+          set -euo pipefail
+          [[ -f .tool-versions ]] || { echo "ERROR: .tool-versions not found"; exit 1; }
+          version=$(grep -E '^\s*python\s+(\S+)\s*$' .tool-versions | awk '{print $2}' | head -n1)
+          [[ -n "$version" ]] || { echo "ERROR: python version not found in .tool-versions"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
   linux:
     name: Cross-platform • linux-x86_64
@@ -192,7 +184,7 @@ jobs:
           check-latest: false
 
       - name: Setup Task
-        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
+        uses: arduino/setup-task@bfe25a35f5c1f609e1d6153197b3b42a04ae054c  # v3.0.0
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -295,7 +287,7 @@ jobs:
           check-latest: false
 
       - name: Setup Task
-        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
+        uses: arduino/setup-task@bfe25a35f5c1f609e1d6153197b3b42a04ae054c  # v3.0.0
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -396,7 +388,7 @@ jobs:
           check-latest: false
 
       - name: Setup Task
-        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
+        uses: arduino/setup-task@bfe25a35f5c1f609e1d6153197b3b42a04ae054c  # v3.0.0
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
