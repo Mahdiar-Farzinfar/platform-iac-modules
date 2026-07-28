@@ -49,17 +49,20 @@ jobs:
           PYTHON_VERSION="$(awk '$1 == "python" { print $2 }' tooling/.tool-versions | head -n 1)"
           TASK_VERSION="$(awk '$1 == "task" { print $2 }' tooling/.tool-versions | head -n 1)"
           NODE_VERSION="$(awk '$1 == "nodejs" { print $2 }' tooling/.tool-versions | head -n 1)"
+          GITLEAKS_VERSION="$(awk '$1 == "gitleaks" { print $2 }' tooling/.tool-versions | head -n 1)"
 
           [[ -n "${TERRAFORM_VERSION}" ]] || { echo "Terraform version is missing"; exit 1; }
           [[ -n "${PYTHON_VERSION}" ]] || { echo "Python version is missing"; exit 1; }
           [[ -n "${TASK_VERSION}" ]] || { echo "Task version is missing"; exit 1; }
           [[ -n "${NODE_VERSION}" ]] || { echo "Node.js version is missing"; exit 1; }
+          [[ -n "${GITLEAKS_VERSION}" ]] || { echo "Gitleaks version is missing"; exit 1; }
 
           {
             echo "terraform=${TERRAFORM_VERSION}"
             echo "python=${PYTHON_VERSION}"
             echo "task=${TASK_VERSION}"
             echo "node=${NODE_VERSION}"
+            echo "gitleaks=${GITLEAKS_VERSION}"
           } >> "$GITHUB_OUTPUT"
 
       - name: Setup Go
@@ -88,6 +91,27 @@ jobs:
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
         with:
           node-version: ${{ steps.tool_versions.outputs.node }}
+
+      - name: Install Gitleaks
+        env:
+          GITLEAKS_VERSION: ${{ steps.tool_versions.outputs.gitleaks }}
+        run: |
+          ARCH="$(uname -m)"
+          case "${ARCH}" in
+            x86_64) GL_ARCH="x64" ;;
+            aarch64|arm64) GL_ARCH="arm64" ;;
+            *) echo "Unsupported architecture: ${ARCH}"; exit 1 ;;
+          esac
+
+          TARBALL="gitleaks_${GITLEAKS_VERSION}_linux_${GL_ARCH}.tar.gz"
+          curl -fsSL -o "${TARBALL}" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${TARBALL}"
+
+          tar -xzf "${TARBALL}" gitleaks
+          sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
+          rm -f "${TARBALL}" gitleaks
+
+          gitleaks version
 
       - name: Install CI utilities
         run: |

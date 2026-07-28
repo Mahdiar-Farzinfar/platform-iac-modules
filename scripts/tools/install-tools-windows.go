@@ -3,6 +3,7 @@
 package main
 
 import (
+	"archive/zip"
 	"bufio"
 	"context"
 	"crypto/sha256"
@@ -361,10 +362,28 @@ func installWithWinget(res *InstallResult, tool string, spec ToolSpec) error {
 	if tool == "yamllint" {
 		return installYamllintWithPip(res, spec)
 	}
+	// Avoid winget exact-version fights (0x8A15002B) when version already matches.
+	refreshWindowsPath()
+	if ok, err := verifyInstalledToolVersion(tool, spec.Version); err == nil && ok {
+		res.InstallOK = true
+		res.VersionOK = true
+		res.VerifyMode = "preinstalled-version"
+		res.ChecksumOK = false
+		return nil
+	}
 	if err := wingetInstallVersioned(res.PackageRef, spec.Version); err != nil {
-		return fmt.Errorf("winget install failed: %w", err)
+		// Catalog gaps / wrong IDs / missing versions → direct release install when possible.
+		if _, supported := verifyBuilders[tool]; supported {
+			if ferr := installFromGitHubRelease(res, tool, spec); ferr != nil {
+				return fmt.Errorf("winget install failed: %w (github fallback: %v)", err, ferr)
+			}
+		} else if ferr := installWingetFallbackBinary(res, tool, spec); ferr != nil {
+			return fmt.Errorf("winget install failed: %w", err)
+		}
 	}
 
+	refreshWindowsPath()
+	ensureWingetToolOnPath(tool)
 	res.InstallOK = true
 	res.VerifyMode = "install-only"
 
@@ -373,6 +392,19 @@ func installWithWinget(res *InstallResult, tool string, spec ToolSpec) error {
 		res.VerifyMode = "version-only"
 	}
 	if err != nil {
+		if _, supported := verifyBuilders[tool]; supported {
+			if ferr := installFromGitHubRelease(res, tool, spec); ferr == nil {
+				verified2, err2 := verifyInstalledToolVersion(tool, spec.Version)
+				if err2 != nil {
+					return fmt.Errorf("version verification failed: %w", err2)
+				}
+				if verified2 {
+					res.VersionOK = true
+					res.VerifyMode = "version-only"
+				}
+				return nil
+			}
+		}
 		return fmt.Errorf("version verification failed: %w", err)
 	}
 	if verified {
@@ -380,6 +412,409 @@ func installWithWinget(res *InstallResult, tool string, spec ToolSpec) error {
 	}
 
 	return nil
+}
+
+func installWingetFallbackBinary(res *InstallResult, tool string, spec ToolSpec) error {
+	// Intentionally narrow: only tools that frequently miss winget catalog pins.
+	v := normalizeSemver(spec.Version)
+	type asset struct {
+		url  string
+		name string // executable inside archive or bare exe
+		zip  bool
+	}
+	var a asset
+	switch tool {
+	case "actionlint":
+		a = asset{
+			url:  fmt.Sprintf("https://github.com/rhysd/actionlint/releases/download/v%s/actionlint_%s_windows_amd64.zip", v, v),
+			name: "actionlint.exe",
+			zip:  true,
+		}
+	case "golangci-lint":
+		a = asset{
+			url:  fmt.Sprintf("https://github.com/golangci/golangci-lint/releases/download/v%s/golangci-lint-%s-windows-amd64.zip", v, v),
+			name: "golangci-lint.exe",
+			zip:  true,
+		}
+	case "task":
+		a = asset{
+			url:  fmt.Sprintf("https://github.com/go-task/task/releases/download/v%s/task_windows_amd64.zip", v),
+			name: "task.exe",
+			zip:  true,
+		}
+	case "just":
+		a = asset{
+			url:  fmt.Sprintf("https://github.com/casey/just/releases/download/%s/just-%s-x86_64-pc-windows-msvc.zip", v, v),
+			name: "just.exe",
+			zip:  true,
+		}
+	case "pre-commit":
+		// Prefer pip when python exists (more reliable than winget id gaps).
+		py, err := resolvePythonExecutable()
+		if err != nil {
+			return err
+		}
+		res.Backend = string(activePackageManager) + "+pip"
+		res.PackageRef = fmt.Sprintf("pre-commit==%s", v)
+		if err := pipInstallUserVersioned(py, "pre-commit", v); err != nil {
+			return err
+		}
+		for _, dir := range discoverPythonScriptsDirs(py) {
+			ensureDirOnPath(dir)
+		}
+		res.InstallOK = true
+		res.VerifyMode = "version-only"
+		res.ChecksumOK = true
+		ok, err := verifyInstalledToolVersion("pre-commit", spec.Version)
+		if err != nil {
+			return err
+		}
+		res.VersionOK = ok
+		return nil
+	case "checkov":
+		py, err := resolvePythonExecutable()
+		if err != nil {
+			return err
+		}
+		res.Backend = string(activePackageManager) + "+pip"
+		res.PackageRef = fmt.Sprintf("checkov==%s", v)
+		if err := pipInstallUserVersioned(py, "checkov", v); err != nil {
+			return err
+		}
+		for _, dir := range discoverPythonScriptsDirs(py) {
+			ensureDirOnPath(dir)
+		}
+		res.InstallOK = true
+		res.VerifyMode = "version-only"
+		res.ChecksumOK = true
+		ok, err := verifyInstalledToolVersion("checkov", spec.Version)
+		if err != nil {
+			return err
+		}
+		res.VersionOK = ok
+		return nil
+	case "docker-cli", "docker-compose":
+		return fmt.Errorf("no reliable non-winget fallback configured for %s on windows CI", tool)
+	default:
+		return fmt.Errorf("no fallback installer for tool=%s", tool)
+	}
+
+	tmpDir, err := os.MkdirTemp("", "tool-fallback-"+tool+"-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmpDir)
+
+	archivePath := filepath.Join(tmpDir, filepath.Base(a.url))
+	if err := downloadFile(archivePath, a.url); err != nil {
+		return err
+	}
+
+	binDir := filepath.Join(defaultToolsBinDir(), tool, v)
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		return err
+	}
+	dest := filepath.Join(binDir, a.name)
+	if a.zip {
+		if err := unzipExecutable(archivePath, dest, a.name); err != nil {
+			return err
+		}
+	} else if err := copyFile(archivePath, dest); err != nil {
+		return err
+	}
+
+	ensureDirOnPath(binDir)
+	res.Backend = string(activePackageManager) + "+github"
+	res.PackageRef = a.url
+	res.InstallOK = true
+	res.VerifyMode = "version-only"
+	res.ChecksumOK = false
+
+	ok, err := verifyInstalledToolVersion(tool, spec.Version)
+	if err != nil {
+		return err
+	}
+	res.VersionOK = ok
+	return nil
+}
+
+func installFromGitHubRelease(res *InstallResult, tool string, spec ToolSpec) error {
+	vb, ok := verifyBuilders[tool]
+	if !ok {
+		return fmt.Errorf("no github verify builder for tool=%s", tool)
+	}
+	vspec, err := vb(spec.Version)
+	if err != nil {
+		return err
+	}
+
+	assetURL, err := resolveReleaseAssetURL(tool, spec.Version, vspec.AssetNamePattern)
+	if err != nil {
+		return err
+	}
+
+	tmpDir, err := os.MkdirTemp("", "tool-"+tool+"-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmpDir)
+
+	assetPath := filepath.Join(tmpDir, filepath.Base(vspec.AssetNamePattern))
+	if err := downloadFile(assetPath, assetURL); err != nil {
+		return fmt.Errorf("download asset: %w", err)
+	}
+
+	sum, err := fileSHA256(assetPath)
+	if err != nil {
+		return err
+	}
+	want, err := lookupChecksum(vspec.ChecksumURL, filepath.Base(vspec.AssetNamePattern))
+	if err != nil {
+		return fmt.Errorf("checksum lookup: %w", err)
+	}
+	if !strings.EqualFold(sum, want) {
+		return fmt.Errorf("checksum mismatch for %s: want=%s got=%s", tool, want, sum)
+	}
+	res.ChecksumOK = true
+	res.VerifyMode = "checksum"
+
+	binDir := filepath.Join(defaultToolsBinDir(), tool, normalizeSemver(spec.Version))
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		return err
+	}
+
+	exeName := tool + ".exe"
+	switch tool {
+	case "docker-cli":
+		exeName = "docker.exe"
+	case "shfmt":
+		exeName = "shfmt.exe"
+	}
+
+	dest := filepath.Join(binDir, exeName)
+	if strings.HasSuffix(strings.ToLower(assetPath), ".zip") {
+		if err := unzipExecutable(assetPath, dest, exeName); err != nil {
+			return err
+		}
+	} else {
+		if err := copyFile(assetPath, dest); err != nil {
+			return err
+		}
+	}
+	ensureDirOnPath(binDir)
+	res.Backend = string(activePackageManager) + "+github"
+	res.PackageRef = assetURL
+	res.InstallOK = true
+
+	verified, err := verifyInstalledToolVersion(tool, spec.Version)
+	if err != nil {
+		return err
+	}
+	if verified {
+		res.VersionOK = true
+	}
+	return nil
+}
+
+func defaultToolsBinDir() string {
+	// Stable, user-writable location on GHA windows runners.
+	root := strings.TrimSpace(os.Getenv("RUNNER_TEMP"))
+	if root == "" {
+		root = os.TempDir()
+	}
+	return filepath.Join(root, "install-tools-bin")
+}
+
+func resolveReleaseAssetURL(tool, version, assetName string) (string, error) {
+	v := normalizeSemver(version)
+	switch tool {
+	case "terraform":
+		return fmt.Sprintf("https://releases.hashicorp.com/terraform/%s/%s", v, assetName), nil
+	case "tflint":
+		return fmt.Sprintf("https://github.com/terraform-linters/tflint/releases/download/v%s/%s", v, assetName), nil
+	case "terraform-docs":
+		return fmt.Sprintf("https://github.com/terraform-docs/terraform-docs/releases/download/v%s/%s", v, assetName), nil
+	case "trivy":
+		return fmt.Sprintf("https://github.com/aquasecurity/trivy/releases/download/v%s/%s", v, assetName), nil
+	case "gitleaks":
+		return fmt.Sprintf("https://github.com/gitleaks/gitleaks/releases/download/v%s/%s", v, assetName), nil
+	case "shfmt":
+		return fmt.Sprintf("https://github.com/mvdan/sh/releases/download/v%s/%s", v, assetName), nil
+	default:
+		return "", fmt.Errorf("no asset URL mapping for tool=%s", tool)
+	}
+}
+
+func downloadFile(dest, url string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), httpTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("GET %s: status %d", url, resp.StatusCode)
+	}
+	f, err := os.Create(dest)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = io.Copy(f, resp.Body)
+	return err
+}
+
+func fileSHA256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func lookupChecksum(checksumURL, assetName string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), httpTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, checksumURL, nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("GET %s: status %d", checksumURL, resp.StatusCode)
+	}
+	sc := bufio.NewScanner(resp.Body)
+	assetLower := strings.ToLower(assetName)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		// Formats: "<sha>  <file>" or "<sha> *<file>" or "<file> <sha>"
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		a, b := fields[0], fields[1]
+		b = strings.TrimPrefix(b, "*")
+		if strings.EqualFold(filepath.Base(b), assetName) || strings.Contains(strings.ToLower(line), assetLower) {
+			if looksLikeSHA256(a) {
+				return a, nil
+			}
+			if looksLikeSHA256(b) {
+				return b, nil
+			}
+		}
+		if looksLikeSHA256(a) && strings.HasSuffix(strings.ToLower(b), strings.ToLower(assetName)) {
+			return a, nil
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return "", err
+	}
+	return "", fmt.Errorf("checksum entry not found for asset %s in %s", assetName, checksumURL)
+}
+
+func looksLikeSHA256(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	for _, r := range s {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Close()
+}
+
+func unzipExecutable(zipPath, destExe, exeName string) error {
+	r, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+
+	targetName := strings.ToLower(filepath.Base(exeName))
+
+	for _, f := range r.File {
+		if f.FileInfo().IsDir() {
+			continue
+		}
+		if strings.ToLower(filepath.Base(f.Name)) != targetName {
+			continue
+		}
+
+		if err := os.MkdirAll(filepath.Dir(destExe), 0o755); err != nil {
+			return err
+		}
+
+		rc, err := f.Open()
+		if err != nil {
+			return err
+		}
+
+		out, err := os.OpenFile(destExe, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+		if err != nil {
+			rc.Close()
+			return err
+		}
+
+		_, copyErr := io.Copy(out, rc)
+		closeErr := rc.Close()
+		outCloseErr := out.Close()
+
+		if copyErr != nil {
+			return copyErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		if outCloseErr != nil {
+			return outCloseErr
+		}
+
+		return nil
+	}
+
+	return fmt.Errorf("executable %s not found in archive %s", exeName, zipPath)
 }
 
 func installMarkdownlintWithNPM(res *InstallResult, spec ToolSpec) error {
@@ -829,6 +1264,187 @@ func ensureExecutableDirOnPath(executable string) {
 	ensureDirOnPath(filepath.Dir(executable))
 }
 
+func refreshWindowsPath() {
+	machine, _ := readRegExpandString(`HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment`, "Path")
+	user, _ := readRegExpandString(`HKCU\Environment`, "Path")
+
+	parts := make([]string, 0, 64)
+	seen := map[string]struct{}{}
+	add := func(chunk string) {
+		for _, p := range strings.Split(chunk, ";") {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				continue
+			}
+			key := strings.ToLower(filepath.Clean(p))
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			parts = append(parts, p)
+		}
+	}
+
+	add(machine)
+	add(user)
+	add(os.Getenv("PATH"))
+
+	// WinGet Links + common user-local bin dirs.
+	localAppData := strings.TrimSpace(os.Getenv("LOCALAPPDATA"))
+	if localAppData != "" {
+		add(filepath.Join(localAppData, "Microsoft", "WinGet", "Links"))
+		add(filepath.Join(localAppData, "Microsoft", "WindowsApps"))
+	}
+	add(filepath.Join(defaultScoopRoot(), "shims"))
+
+	_ = os.Setenv("PATH", strings.Join(parts, ";"))
+}
+
+func readRegExpandString(keyName, valueName string) (string, error) {
+	out, err := runOut("reg", "query", keyName, "/v", valueName)
+	if err != nil {
+		return "", err
+	}
+	// Example line: "    Path    REG_EXPAND_SZ    C:\Windows\system32;..."
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || !strings.Contains(strings.ToUpper(line), "REG_") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		idx := strings.Index(strings.ToUpper(line), "REG_")
+		if idx < 0 {
+			continue
+		}
+		rest := strings.TrimSpace(line[idx:])
+		parts := strings.SplitN(rest, " ", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		data := strings.TrimSpace(parts[1])
+		// Drop the type token if still present.
+		if i := strings.IndexAny(data, " \t"); i >= 0 {
+			typeTok := strings.ToUpper(strings.TrimSpace(data[:i]))
+			if strings.HasPrefix(typeTok, "REG_") {
+				data = strings.TrimSpace(data[i:])
+			}
+		}
+		return data, nil
+	}
+	return "", fmt.Errorf("registry value %s\\%s not found", keyName, valueName)
+}
+
+func toolExecutableNames(tool string) []string {
+	switch tool {
+	case "nodejs":
+		return []string{"node.exe", "node"}
+	case "markdownlint":
+		return []string{"markdownlint-cli2.exe", "markdownlint-cli2.cmd", "markdownlint-cli2"}
+	case "docker-cli":
+		return []string{"docker.exe", "docker"}
+	case "docker-compose":
+		return []string{"docker-compose.exe", "docker-compose"}
+	default:
+		return []string{tool + ".exe", tool + ".cmd", tool + ".bat", tool}
+	}
+}
+
+func wingetSearchDirs(tool string) []string {
+	dirs := make([]string, 0, 32)
+	add := func(dir string) {
+		dir = strings.TrimSpace(dir)
+		if dir == "" {
+			return
+		}
+		if st, err := os.Stat(dir); err == nil && st.IsDir() {
+			dirs = append(dirs, dir)
+		}
+	}
+
+	localAppData := strings.TrimSpace(os.Getenv("LOCALAPPDATA"))
+	programFiles := strings.TrimSpace(os.Getenv("ProgramFiles"))
+	programFilesX86 := strings.TrimSpace(os.Getenv("ProgramFiles(x86)"))
+
+	if localAppData != "" {
+		add(filepath.Join(localAppData, "Microsoft", "WinGet", "Links"))
+		add(filepath.Join(localAppData, "Microsoft", "WindowsApps"))
+		pkgRoot := filepath.Join(localAppData, "Microsoft", "WinGet", "Packages")
+		if entries, err := os.ReadDir(pkgRoot); err == nil {
+			for _, e := range entries {
+				if !e.IsDir() {
+					continue
+				}
+				base := filepath.Join(pkgRoot, e.Name())
+				add(base)
+				add(filepath.Join(base, "bin"))
+				if sub, err := os.ReadDir(base); err == nil {
+					for _, s := range sub {
+						if s.IsDir() {
+							add(filepath.Join(base, s.Name()))
+							add(filepath.Join(base, s.Name(), "bin"))
+						}
+					}
+				}
+			}
+		}
+	}
+
+	for _, root := range []string{programFiles, programFilesX86} {
+		if root == "" {
+			continue
+		}
+		// Heuristic product folders.
+		switch tool {
+		case "terraform":
+			add(filepath.Join(root, "Terraform"))
+		case "nodejs":
+			add(filepath.Join(root, "nodejs"))
+		case "trivy":
+			add(filepath.Join(root, "Trivy"))
+		case "gitleaks":
+			add(filepath.Join(root, "Gitleaks"))
+		case "just":
+			add(filepath.Join(root, "just"))
+		}
+	}
+
+	add(filepath.Join(defaultScoopRoot(), "shims"))
+	add(filepath.Join(defaultScoopRoot(), "apps", tool, "current"))
+	return dirs
+}
+
+func ensureWingetToolOnPath(tool string) {
+	refreshWindowsPath()
+	names := toolExecutableNames(tool)
+	// If already resolvable, nothing to do.
+	for _, n := range names {
+		if _, err := exec.LookPath(n); err == nil {
+			return
+		}
+	}
+	if dir, ok := findToolDirOnDiskByNames(names, wingetSearchDirs(tool)); ok {
+		ensureDirOnPath(dir)
+	}
+}
+
+func findToolDirOnDiskByNames(names []string, dirs []string) (string, bool) {
+	for _, dir := range dirs {
+		for _, name := range names {
+			candidate := name
+			if !filepath.IsAbs(name) {
+				candidate = filepath.Join(dir, name)
+			}
+			if fileExists(candidate) {
+				return dir, true
+			}
+		}
+	}
+	return "", false
+}
+
 // scoopAppName extracts the app leaf from a scoop ref ("main/gitleaks" -> "gitleaks").
 func scoopAppName(packageRef string) string {
 	packageRef = strings.TrimSpace(packageRef)
@@ -883,6 +1499,7 @@ func ensureScoopToolOnPath(packageRef, tool string) {
 // resolveToolExecutable finds a CLI on PATH, then common Scoop locations.
 // Returns an absolute path suitable for exec.Command on Windows.
 func resolveToolExecutable(name string) (string, error) {
+	refreshWindowsPath()
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return "", errors.New("empty tool executable name")
@@ -929,7 +1546,15 @@ func resolveToolExecutable(name string) (string, error) {
 			}
 		}
 	}
-
+	if dir, ok := findToolDirOnDiskByNames(toolExecutableNames(name), wingetSearchDirs(name)); ok {
+		for _, cand := range toolExecutableNames(name) {
+			p := filepath.Join(dir, cand)
+			if fileExists(p) {
+				ensureDirOnPath(dir)
+				return p, nil
+			}
+		}
+	}
 	return "", fmt.Errorf("executable %q not found in PATH or Scoop app dirs", name)
 }
 
@@ -942,7 +1567,8 @@ func bootstrapScoop() error {
 }
 
 func wingetInstallVersioned(packageID, version string) error {
-	baseArgs := []string{
+	version = normalizeSemver(version)
+	base := []string{
 		"install",
 		"--id", packageID,
 		"--exact",
@@ -950,13 +1576,64 @@ func wingetInstallVersioned(packageID, version string) error {
 		"--accept-source-agreements",
 		"--disable-interactivity",
 		"--silent",
+		"--version", version,
 	}
 
-	versionArgs := append(append([]string{}, baseArgs...), "--version", normalizeSemver(version))
-	if err := run(wingetExecutable, versionArgs...); err != nil {
-		return fmt.Errorf("exact-version install failed for %s@%s: %w", packageID, normalizeSemver(version), err)
+	if err := run(wingetExecutable, base...); err == nil {
+		return nil
+	} else if isWingetAlreadyInstalledError(err) {
+		// Install step is OK; caller must verify the on-PATH version.
+		return nil
+	} else if isWingetNoPackageOrVersionError(err) {
+		return err
+	}
+
+	upgrade := []string{
+		"upgrade",
+		"--id", packageID,
+		"--exact",
+		"--accept-package-agreements",
+		"--accept-source-agreements",
+		"--disable-interactivity",
+		"--silent",
+		"--version", version,
+	}
+	if err := run(wingetExecutable, upgrade...); err == nil || isWingetAlreadyInstalledError(err) {
+		return nil
+	}
+
+	force := append(append([]string{}, base...), "--force")
+	if err := run(wingetExecutable, force...); err == nil || isWingetAlreadyInstalledError(err) {
+		return nil
+	}
+
+	// Preserve original exact-install failure for diagnostics.
+	if err := run(wingetExecutable, base...); err != nil {
+		return err
 	}
 	return nil
+}
+
+func isWingetAlreadyInstalledError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "0x8a15002b") ||
+		strings.Contains(msg, "no available upgrade found") ||
+		strings.Contains(msg, "no newer package versions are available") ||
+		strings.Contains(msg, "found an existing package already installed")
+}
+
+func isWingetNoPackageOrVersionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "0x8a150014") ||
+		strings.Contains(msg, "0x8a150017") ||
+		strings.Contains(msg, "no package found matching input criteria") ||
+		strings.Contains(msg, "no version found matching")
 }
 
 func scoopInstallVersioned(app, version string) error {
@@ -1086,20 +1763,6 @@ func parseChecksumForAsset(content, asset string) (string, bool) {
 	}
 
 	return "", false
-}
-
-func fileSHA256(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 func httpGet(url string) (string, error) {

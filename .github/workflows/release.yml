@@ -220,18 +220,24 @@ jobs:
           detect_bump_from_messages() {
             local messages="$1"
             local best="none"
+            local line
+            # ERE patterns for Conventional Commits (unquoted on =~ RHS).
+            local re_breaking_footer='BREAKING[[:space:]]CHANGE:'
+            local re_breaking_type='^[a-zA-Z0-9_-]+(\([^)]+\))?!:'
+            local re_feat='^feat(\([^)]+\))?:'
+            local re_patch='^(fix|perf|refactor|revert|security)(\([^)]+\))?:'
 
             while IFS= read -r line; do
               [[ -z "${line}" ]] && continue
 
-              if [[ "${line}" =~ BREAKING[[:space:]]CHANGE: ]] || [[ "${line}" =~ ^[a-zA-Z0-9_-]+(\([^)]+\))?!: ]]; then
+              if [[ "${line}" =~ $re_breaking_footer || "${line}" =~ $re_breaking_type ]]; then
                 best="major"
                 break
-              elif [[ "${line}" =~ ^feat(\([^)]+\))?: ]]; then
+              elif [[ "${line}" =~ $re_feat ]]; then
                 if [[ "$(bump_rank "${best}")" -lt 2 ]]; then
                   best="minor"
                 fi
-              elif [[ "${line}" =~ ^(fix|perf|refactor|revert|security)(\([^)]+\))?: ]]; then
+              elif [[ "${line}" =~ $re_patch ]]; then
                 if [[ "$(bump_rank "${best}")" -lt 1 ]]; then
                   best="patch"
                 fi

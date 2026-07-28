@@ -328,7 +328,8 @@ jobs:
       - name: Install OSV-Scanner
         run: |
           set -euo pipefail
-          export PATH="$(go env GOPATH)/bin:${PATH}"
+          GOPATH="$(go env GOPATH)"
+          export PATH="${GOPATH}/bin:${PATH}"
           go install github.com/google/osv-scanner/v2/cmd/osv-scanner@latest
           echo "$(go env GOPATH)/bin" >> "${GITHUB_PATH}"
           osv-scanner --version
@@ -337,7 +338,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "${OSV_OUTPUT_DIR}"
-          export PATH="$(go env GOPATH)/bin:${PATH}"
+          GOPATH="$(go env GOPATH)"
+          export PATH="${GOPATH}/bin:${PATH}"
           osv-scanner --recursive --format=json \
             --output="${OSV_OUTPUT_DIR}/osv-results.json" \
             . || true
