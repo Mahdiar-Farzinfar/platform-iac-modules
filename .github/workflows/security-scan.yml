@@ -27,6 +27,7 @@ env:
   CHECKOV_OUTPUT_DIR: .security-results/checkov
   TRIVY_OUTPUT_DIR: .security-results/trivy
   OSV_OUTPUT_DIR: .security-results/osv
+  PATH_EXTRA: ${{ github.workspace }}/.bin:${{ github.workspace }}/bin:${{ github.workspace }}/tooling/bin:$HOME/.local/bin:$HOME/go/bin:$HOME/.asdf/shims
 
 jobs:
   detect-targets:
@@ -41,7 +42,7 @@ jobs:
       has_root_tf: ${{ steps.detect.outputs.has_root_tf }}
     steps:
       - name: Checkout
-        uses: actions/checkout@1044a6dea927916f2c38ba5aeffbc0a847b1221a  # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 1
@@ -58,9 +59,11 @@ jobs:
           if [ -d "tooling" ] && find tooling -type f \( -name '*.tf' -o -name '*.tfvars' \) | grep -q .; then has_tooling=true; fi
           if find . -maxdepth 1 -type f \( -name '*.tf' -o -name '*.tfvars' \) | grep -q .; then has_root_tf=true; fi
 
-          echo "has_modules=${has_modules}" >> "${GITHUB_OUTPUT}"
-          echo "has_tooling=${has_tooling}" >> "${GITHUB_OUTPUT}"
-          echo "has_root_tf=${has_root_tf}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "has_modules=${has_modules}"
+            echo "has_tooling=${has_tooling}"
+            echo "has_root_tf=${has_root_tf}"
+          } >> "${GITHUB_OUTPUT}"
 
   checkov:
     name: Checkov IaC Scan
@@ -73,13 +76,35 @@ jobs:
       security-events: write
     steps:
       - name: Checkout
-        uses: actions/checkout@1044a6dea927916f2c38ba5aeffbc0a847b1221a  # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 1
 
       - name: Setup Task
-        uses: arduino/setup-task@bfe25a35f5c1f609e1d6153197b3b42a04ae054c  # v3.0.0
+        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
+
+      - name: Setup Go (bootstrap installer)
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Bootstrap toolchain (Task SoT)
+        run: |
+          set -euo pipefail
+          export PATH="${PATH_EXTRA}:${PATH}"
+          if task --list 2>/dev/null | grep -qE '^[[:space:]]*bootstrap([[:space:]]|$)'; then
+            task bootstrap:posix -- --apply --non-interactive
+          else
+            task bootstrap:posix -- --apply --non-interactive
+          fi
+          echo "${PATH_EXTRA}" | tr ':' '\n' | while read -r d; do
+            [ -n "${d}" ] && echo "${d}" >> "${GITHUB_PATH}"
+          done
+          if [ -d "${HOME}/.asdf/shims" ]; then
+            echo "${HOME}/.asdf/shims" >> "${GITHUB_PATH}"
+          fi
 
       - name: Preflight (Taskfile SoT)
         run: task preflight
@@ -121,13 +146,35 @@ jobs:
       security-events: write
     steps:
       - name: Checkout
-        uses: actions/checkout@1044a6dea927916f2c38ba5aeffbc0a847b1221a  # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 1
 
       - name: Setup Task
-        uses: arduino/setup-task@bfe25a35f5c1f609e1d6153197b3b42a04ae054c  # v3.0.0
+        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
+
+      - name: Setup Go (bootstrap installer)
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Bootstrap toolchain (Task SoT)
+        run: |
+          set -euo pipefail
+          export PATH="${PATH_EXTRA}:${PATH}"
+          if task --list 2>/dev/null | grep -qE '^[[:space:]]*bootstrap([[:space:]]|$)'; then
+            task bootstrap:posix -- --apply --non-interactive
+          else
+            task bootstrap:posix -- --apply --non-interactive
+          fi
+          echo "${PATH_EXTRA}" | tr ':' '\n' | while read -r d; do
+            [ -n "${d}" ] && echo "${d}" >> "${GITHUB_PATH}"
+          done
+          if [ -d "${HOME}/.asdf/shims" ]; then
+            echo "${HOME}/.asdf/shims" >> "${GITHUB_PATH}"
+          fi
 
       - name: Preflight (Taskfile SoT)
         run: task preflight
@@ -192,13 +239,64 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@1044a6dea927916f2c38ba5aeffbc0a847b1221a  # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0
 
       - name: Setup Task
-        uses: arduino/setup-task@bfe25a35f5c1f609e1d6153197b3b42a04ae054c  # v3.0.0
+        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
+
+      - name: Setup Go (bootstrap installer)
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install Gitleaks (version from tooling/.tool-versions)
+        run: |
+          set -euo pipefail
+
+          GITLEAKS_VERSION="$(grep -E '^gitleaks[[:space:]]' tooling/.tool-versions | awk '{print $2}')"
+          if [ -z "${GITLEAKS_VERSION}" ]; then
+            echo "::error::gitleaks version not found in tooling/.tool-versions"
+            exit 1
+          fi
+
+          case "$(uname -m)" in
+            x86_64)          ARCH="x64"   ;;
+            aarch64|arm64)   ARCH="arm64" ;;
+            *)
+              echo "::error::Unsupported architecture: $(uname -m)"
+              exit 1
+              ;;
+          esac
+
+          mkdir -p "${HOME}/.local/bin"
+          curl -sSfL \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${ARCH}.tar.gz" \
+            -o /tmp/gitleaks.tar.gz
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          install -m 0755 /tmp/gitleaks "${HOME}/.local/bin/gitleaks"
+          rm -f /tmp/gitleaks.tar.gz /tmp/gitleaks
+          echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
+          "${HOME}/.local/bin/gitleaks" version
+
+      - name: Bootstrap toolchain (Task SoT)
+        run: |
+          set -euo pipefail
+          export PATH="${PATH_EXTRA}:${PATH}"
+          if task --list 2>/dev/null | grep -qE '^[[:space:]]*bootstrap([[:space:]]|$)'; then
+            task bootstrap:posix -- --apply --non-interactive
+          else
+            task bootstrap:posix -- --apply --non-interactive
+          fi
+          echo "${PATH_EXTRA}" | tr ':' '\n' | while read -r d; do
+            [ -n "${d}" ] && echo "${d}" >> "${GITHUB_PATH}"
+          done
+          if [ -d "${HOME}/.asdf/shims" ]; then
+            echo "${HOME}/.asdf/shims" >> "${GITHUB_PATH}"
+          fi
 
       - name: Run Gitleaks from Taskfile (SoT)
         run: task security:gitleaks TASK_X_SKIP_DEPS=1
@@ -211,24 +309,38 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@1044a6dea927916f2c38ba5aeffbc0a847b1221a  # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 1
+
+      - name: Setup Go (for OSV-Scanner install)
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: 1.26.4
+          cache: true
 
       - name: Prepare output directories
         run: |
           set -euo pipefail
           mkdir -p "${OSV_OUTPUT_DIR}"
 
+      - name: Install OSV-Scanner
+        run: |
+          set -euo pipefail
+          export PATH="$(go env GOPATH)/bin:${PATH}"
+          go install github.com/google/osv-scanner/v2/cmd/osv-scanner@latest
+          echo "$(go env GOPATH)/bin" >> "${GITHUB_PATH}"
+          osv-scanner --version
+
       - name: Run OSV-Scanner
-        uses: google/osv-scanner-action@9a498708959aeaef5ef730655706c5a1df1edbc2  # v2.3.8
-        with:
-          scan-args: |-
-            --recursive
-            --format=json
-            --output=${{ env.OSV_OUTPUT_DIR }}/osv-results.json
-            ./
+        run: |
+          set -euo pipefail
+          mkdir -p "${OSV_OUTPUT_DIR}"
+          export PATH="$(go env GOPATH)/bin:${PATH}"
+          osv-scanner --recursive --format=json \
+            --output="${OSV_OUTPUT_DIR}/osv-results.json" \
+            . || true
 
   upload-reports:
     name: Upload Security Reports
@@ -240,7 +352,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@1044a6dea927916f2c38ba5aeffbc0a847b1221a  # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 1

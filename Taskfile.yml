@@ -109,7 +109,7 @@ tasks:
     desc: Bootstrap on Linux/macOS
     platforms: [linux, darwin]
     cmds:
-      - sh "{{.BOOTSTRAP_DIR}}/setup.sh"
+      - bash "{{.BOOTSTRAP_DIR}}/setup.sh" {{.CLI_ARGS | default "--plan"}}
 
   bootstrap:windows:
     desc: Bootstrap on Windows
@@ -367,7 +367,6 @@ tasks:
 
   security:gitleaks:
     desc: Run secrets scan using gitleaks
-    deps: [preflight]
     cmds:
       - gitleaks detect --verbose --source "{{.ROOT_DIR}}" --no-git
 

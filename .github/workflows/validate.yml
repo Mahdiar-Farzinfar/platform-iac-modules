@@ -93,41 +93,157 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
-      go_version: ${{ steps.validate-outputs.outputs.go }}
-      terraform_version: ${{ steps.validate-outputs.outputs.terraform }}
-      python_version: ${{ steps.validate-outputs.outputs.python }}
-      tflint_version: ${{ steps.validate-outputs.outputs.tflint }}
-      terraform_docs_version: ${{ steps.validate-outputs.outputs.terraform_docs }}
+      go_version: ${{ steps.tool-versions.outputs.go_version }}
+      terraform_version: ${{ steps.tool-versions.outputs.terraform_version }}
+      python_version: ${{ steps.tool-versions.outputs.python_version }}
+      tflint_version: ${{ steps.tool-versions.outputs.tflint_version }}
+      terraform_docs_version: ${{ steps.tool-versions.outputs.terraform_docs_version }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@1044a6dea927916f2c38ba5aeffbc0a847b1221a  # v7.0.0
 
       - name: Install Task
-        uses: arduino/setup-task@bfe25a35f5c1f609e1d6153197b3b42a04ae054c  # v3.0.0
+        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
         with:
           version: 3.x
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
       - name: Read canonical toolchain versions and verify mirrors
         id: tool-versions
-        run: task verify:toolchain
+        run: |
+          set -euo pipefail
+          task verify:toolchain
+
+          TF_VER=""
+          GO_VER=""
+          PY_VER=""
+          TFLINT_VER=""
+          TFDOCS_VER=""
+
+          if [[ -f "${TERRAFORM_VERSION_FILE}" ]]; then
+            TF_VER="$(tr -d '[:space:]' < "${TERRAFORM_VERSION_FILE}")"
+          fi
+          if [[ -f go.mod ]]; then
+            GO_VER="$(awk '/^go / {print $2; exit}' go.mod)"
+          fi
+          if [[ -f "${TOOL_VERSIONS_FILE}" ]]; then
+            PY_VER="$(awk '/^python[[:space:]]+/ {print $2; exit}' "${TOOL_VERSIONS_FILE}" || true)"
+            TFLINT_VER="$(awk '/^tflint[[:space:]]+/ {print $2; exit}' "${TOOL_VERSIONS_FILE}" || true)"
+            TFDOCS_VER="$(awk '/^terraform-docs[[:space:]]+/ {print $2; exit}' "${TOOL_VERSIONS_FILE}" || true)"
+          fi
+
+          : "${PY_VER:=3.12}"
+
+          if [[ -z "${TF_VER}" || -z "${GO_VER}" ]]; then
+            echo "::error::Failed to resolve terraform/go versions from canonical files"
+            exit 1
+          fi
+
+          {
+            echo "terraform_version=${TF_VER}"
+            echo "go_version=${GO_VER}"
+            echo "python_version=${PY_VER}"
+            echo "tflint_version=${TFLINT_VER}"
+            echo "terraform_docs_version=${TFDOCS_VER}"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Validate output patterns (Sanitization against Injection)
         id: validate-outputs
         run: |
           task verify:outputs \
-            GO_VERSION="${{ steps.tool-versions.outputs.go }}" \
-            TERRAFORM_VERSION="${{ steps.tool-versions.outputs.terraform }}" \
-            PYTHON_VERSION="${{ steps.tool-versions.outputs.python }}" \
-            TFLINT_VERSION="${{ steps.tool-versions.outputs.tflint }}" \
-            TERRAFORM_DOCS_VERSION="${{ steps.tool-versions.outputs.terraform_docs }}"
+            GO_VERSION="${{ steps.tool-versions.outputs.go_version }}" \
+            TERRAFORM_VERSION="${{ steps.tool-versions.outputs.terraform_version }}" \
+            PYTHON_VERSION="${{ steps.tool-versions.outputs.python_version }}" \
+            TFLINT_VERSION="${{ steps.tool-versions.outputs.tflint_version }}" \
+            TERRAFORM_DOCS_VERSION="${{ steps.tool-versions.outputs.terraform_docs_version }}"
 
       - name: Setup Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
         with:
-          python-version: ${{ steps.tool-versions.outputs.python }}
-          cache: pip
+          python-version: ${{ steps.tool-versions.outputs.python_version }}
+
+      - name: Bootstrap toolchain
+        run: |
+          set -euo pipefail
+          # CI runs on Linux (ubuntu-latest / act Linux container).
+          if [[ "$(uname -s)" == "Linux" ]]; then
+            if ! command -v asdf >/dev/null 2>&1 && ! command -v mise >/dev/null 2>&1; then
+              echo "Installing mise (no asdf/mise preinstalled)"
+              curl -fsSL https://mise.run | sh
+              export PATH="${HOME}/.local/bin:${PATH}"
+              echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
+            fi
+            if task -l 2>/dev/null | grep -Eq '(^|[[:space:]])bootstrap:linux([[:space:]]|$)'; then
+              task bootstrap:linux
+            elif task -l 2>/dev/null | grep -Eq '(^|[[:space:]])bootstrap:ci([[:space:]]|$)'; then
+              task bootstrap:ci
+            elif task -l 2>/dev/null | grep -Eq '(^|[[:space:]])ci:bootstrap([[:space:]]|$)'; then
+              task ci:bootstrap
+            elif task -l 2>/dev/null | grep -Eq '(^|[[:space:]])bootstrap:posix([[:space:]]|$)'; then
+              task bootstrap:posix
+            elif task -l 2>/dev/null | grep -Eq '(^|[[:space:]])bootstrap([[:space:]]|$)'; then
+              task bootstrap
+            else
+              if [[ -f scripts/tools/install-tools-posix.go ]]; then
+                go run ./scripts/tools/install-tools-posix.go --root "${GITHUB_WORKSPACE}"
+              elif [[ -f scripts/tools/install-tools-linux.go ]]; then
+                go run ./scripts/tools/install-tools-linux.go --root "${GITHUB_WORKSPACE}"
+              elif [[ -f scripts/tools/install-tools.go ]]; then
+                go run ./scripts/tools/install-tools.go --root "${GITHUB_WORKSPACE}"
+              else
+                echo "::warning::No Linux bootstrap installer found; continuing with setup actions + PATH only"
+              fi
+            fi
+          else
+            task bootstrap
+          fi
+
+          echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
+          echo "${HOME}/bin" >> "${GITHUB_PATH}"
+          if [[ -d "${HOME}/.asdf/shims" ]]; then
+            echo "${HOME}/.asdf/shims" >> "${GITHUB_PATH}"
+            echo "${HOME}/.asdf/bin" >> "${GITHUB_PATH}"
+          fi
+          if [[ -n "${ASDF_DATA_DIR:-}" ]]; then
+            echo "${ASDF_DATA_DIR}/shims" >> "${GITHUB_PATH}"
+            echo "${ASDF_DATA_DIR}/bin" >> "${GITHUB_PATH}"          fi
+          if [[ -d "${HOME}/.local/share/mise/shims" ]]; then
+            echo "${HOME}/.local/share/mise/shims" >> "${GITHUB_PATH}"
+          fi
+          if command -v mise >/dev/null 2>&1; then
+            # Ensure mise-managed tools are visible to subsequent steps.
+            eval "$(mise activate bash --shims 2>/dev/null || true)"
+            if mise bin-paths >/dev/null 2>&1; then
+              while IFS= read -r p; do
+                [[ -n "${p}" ]] && echo "${p}" >> "${GITHUB_PATH}"
+              done < <(mise bin-paths 2>/dev/null || true)
+            fi
+          fi
+          if command -v go >/dev/null 2>&1; then
+            GOPATH_BIN="$(go env GOPATH)/bin"
+            echo "${GOPATH_BIN}" >> "${GITHUB_PATH}"
+          fi
+
+      - name: Sanity-check required CLIs on PATH
+        run: |
+          set -euo pipefail
+          for bin in terraform tflint trivy golangci-lint go python3 git; do
+            if ! command -v "${bin}" >/dev/null 2>&1; then
+              echo "::error::Required tool '${bin}' is not on PATH after bootstrap"
+              exit 1
+            fi
+            echo "OK: ${bin} -> $(command -v "${bin}")"
+          done
+          # surface versions for debugging
+          terraform version || true
+          tflint --version || true
 
       - name: Run repo-level pre-commit
         uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd  # v3.0.1
@@ -139,12 +255,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: repo-baseline
+    if: needs.repo-baseline.result == 'success'
     outputs:
-      matrix: ${{ steps.build-matrix.outputs.matrix }}
-      has_changes: ${{ steps.build-matrix.outputs.has_changes }}
+      matrix: ${{ steps.build-matrix.outputs.matrix || '{"include":[]}' }}
+      has_changes: ${{ steps.build-matrix.outputs.has_changes || 'false' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@1044a6dea927916f2c38ba5aeffbc0a847b1221a  # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
 
@@ -158,7 +275,6 @@ jobs:
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
         with:
           python-version: ${{ needs.repo-baseline.outputs.python_version }}
-          cache: pip
 
       - name: Detect shared validation triggers
         id: shared-changes
@@ -280,6 +396,12 @@ jobs:
 
           MATRIX_JSON="$(jq -c . /tmp/matrix.json)"
           HAS_CHANGES=$(jq -r '.include | length > 0' /tmp/matrix.json)
+          if ! jq -e . >/dev/null 2>&1 <<<"${MATRIX_JSON}"; then
+            echo "::error::Generated matrix is not valid JSON"
+            echo "${MATRIX_JSON}"
+            exit 1
+          fi
+
           echo "has_changes=${HAS_CHANGES}" >> "$GITHUB_OUTPUT"
           echo "matrix=${MATRIX_JSON}" >> "$GITHUB_OUTPUT"
 
@@ -288,10 +410,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [repo-baseline, detect-changes]
-    if: needs.detect-changes.outputs.has_changes == 'true'
+    if: >-
+      always() &&
+      needs.repo-baseline.result == 'success' &&
+      needs.detect-changes.result == 'success' &&
+      needs.detect-changes.outputs.has_changes == 'true'
     strategy:
       fail-fast: false
-      matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
+      matrix: ${{ fromJson(needs.detect-changes.outputs.matrix || '{"include":[]}') }}
     permissions:
       contents: read
       pull-requests: read
@@ -337,7 +463,6 @@ jobs:
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
         with:
           python-version: ${{ needs.repo-baseline.outputs.python_version }}
-          cache: pip
 
       - name: Setup TFLint
         uses: terraform-linters/setup-tflint@6e1e0642c0289bd619021bf6b34e3c08ed1e005a  # v6.3.0
@@ -474,7 +599,7 @@ jobs:
         run: |
           results='${{ toJson(needs) }}'
           for job in repo-baseline detect-changes validate-modules fallback-validate-all; do
-            result=$(echo "$results" | jq -r --arg j "$job" '.[$j].result')
+            result=$(echo "$results" | jq -r --arg j "$job" '.[$j].result // "missing"')
             if [[ "$result" != "success" && "$result" != "skipped" ]]; then
               echo "::error::Job '$job' did not pass (result: $result)"
               exit 1

@@ -336,8 +336,12 @@ jobs:
             mv "${tmp_releases}.next" "${tmp_releases}"
           done < <(jq -c '.[]' "${tmp_domains}")
 
-          releases="$(cat "${tmp_releases}")"
-          echo "releases=${releases}" >> "${GITHUB_OUTPUT}"
+          releases="$(jq -c '.' "${tmp_releases}")"
+          {
+            echo "releases<<RELEASES_EOF"
+            echo "${releases}"
+            echo "RELEASES_EOF"
+          } >> "${GITHUB_OUTPUT}"
 
           if [[ "$(jq 'length' "${tmp_releases}")" -gt 0 ]]; then
             echo 'has_releases=true' >> "${GITHUB_OUTPUT}"
@@ -345,9 +349,13 @@ jobs:
             echo 'has_releases=false' >> "${GITHUB_OUTPUT}"
           fi
 
-          image_release="$(jq -c '[.[] | select(.kind == "image" and .name == "devcontainer")][0] // empty' "${tmp_releases}")"
+          image_release="$(jq -c '[.[] | select(.kind == "image" and .name == "devcontainer")][0] // empty' <<< "${releases}")"
           if [[ -n "${image_release}" ]]; then
-            echo "image_release=${image_release}" >> "${GITHUB_OUTPUT}"
+            {
+              echo "image_release<<IMAGE_RELEASE_EOF"
+              echo "${image_release}"
+              echo "IMAGE_RELEASE_EOF"
+            } >> "${GITHUB_OUTPUT}"
             echo 'has_image_release=true' >> "${GITHUB_OUTPUT}"
           else
             echo 'image_release=' >> "${GITHUB_OUTPUT}"
@@ -367,7 +375,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        release: ${{ fromJson(needs.prepare.outputs.releases) }}
+        release: ${{ fromJson(needs.prepare.outputs.releases || '[]') }}
     steps:
       - name: Checkout
         uses: actions/checkout@1044a6dea927916f2c38ba5aeffbc0a847b1221a  # v7.0.0
@@ -480,7 +488,7 @@ jobs:
               '' > CHANGELOG.md
           fi
 
-          python <<'PY'
+          python3 - <<'PY'
           import os
           from pathlib import Path
 

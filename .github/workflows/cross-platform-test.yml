@@ -9,7 +9,7 @@ on:
       - "go.mod"
       - "go.sum"
       - "Taskfile.yml"
-      - ".tool-versions"
+      - "tooling/.tool-versions"
       - "justfile"
       - "Makefile"
       - ".pre-commit-config.yaml"
@@ -25,7 +25,7 @@ on:
       - "go.mod"
       - "go.sum"
       - "Taskfile.yml"
-      - ".tool-versions"
+      - "tooling/.tool-versions"
       - "justfile"
       - "Makefile"
       - ".pre-commit-config.yaml"
@@ -75,7 +75,7 @@ jobs:
               - 'go.mod'
               - 'go.sum'
               - 'Taskfile.yml'
-              - '.tool-versions'
+              - 'tooling/.tool-versions'
               - 'justfile'
               - 'Makefile'
               - '.pre-commit-config.yaml'
@@ -90,7 +90,7 @@ jobs:
               - 'go.mod'
               - 'go.sum'
               - 'Taskfile.yml'
-              - '.tool-versions'
+              - 'tooling/.tool-versions'
               - 'justfile'
               - 'Makefile'
               - 'scripts/bootstrap/**'
@@ -104,7 +104,7 @@ jobs:
               - 'go.mod'
               - 'go.sum'
               - 'Taskfile.yml'
-              - '.tool-versions'
+              - 'tooling/.tool-versions'
               - 'justfile'
               - 'Makefile'
               - 'scripts/bootstrap/**'
@@ -133,9 +133,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          [[ -f .tool-versions ]] || { echo "ERROR: .tool-versions not found"; exit 1; }
-          version=$(grep -E '^\s*python\s+(\S+)\s*$' .tool-versions | awk '{print $2}' | head -n1)
-          [[ -n "$version" ]] || { echo "ERROR: python version not found in .tool-versions"; exit 1; }
+          TOOL_VERSIONS_FILE="tooling/.tool-versions"
+          [[ -f "$TOOL_VERSIONS_FILE" ]] || { echo "ERROR: $TOOL_VERSIONS_FILE not found"; exit 1; }
+          version=$(grep -E '^\s*python\s+(\S+)\s*$' "$TOOL_VERSIONS_FILE" | awk '{print $2}' | head -n1)
+          [[ -n "$version" ]] || { echo "ERROR: python version not found in $TOOL_VERSIONS_FILE"; exit 1; }
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
   linux:
@@ -184,7 +185,7 @@ jobs:
           check-latest: false
 
       - name: Setup Task
-        uses: arduino/setup-task@bfe25a35f5c1f609e1d6153197b3b42a04ae054c  # v3.0.0
+        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -287,7 +288,7 @@ jobs:
           check-latest: false
 
       - name: Setup Task
-        uses: arduino/setup-task@bfe25a35f5c1f609e1d6153197b3b42a04ae054c  # v3.0.0
+        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -388,7 +389,7 @@ jobs:
           check-latest: false
 
       - name: Setup Task
-        uses: arduino/setup-task@bfe25a35f5c1f609e1d6153197b3b42a04ae054c  # v3.0.0
+        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 

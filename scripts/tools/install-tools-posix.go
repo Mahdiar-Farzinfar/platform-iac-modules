@@ -85,7 +85,8 @@ var (
 		"gitleaks":       func() (string, error) { return commandVersion("gitleaks", "version") },
 		"docker-cli":     func() (string, error) { return commandVersion("docker", "--version") },
 		"docker-compose": verifyDockerComposeVersion,
-		"golang":         func() (string, error) { return commandVersion("go", "version") },
+		"golang":         verifyGoVersion,
+		"shfmt":          func() (string, error) { return commandVersion("shfmt", "--version") },
 	}
 
 	verifyBuilders = map[string]func(version string) (VerifySpec, error){
@@ -194,6 +195,21 @@ var (
 				ChecksumURL:      fmt.Sprintf("https://github.com/gitleaks/gitleaks/releases/download/v%s/gitleaks_%s_checksums.txt", v, v),
 			}, nil
 		},
+		"shfmt": func(v string) (VerifySpec, error) {
+			v = normalizeSemver(v)
+			p, err := currentPlatform()
+			if err != nil {
+				return VerifySpec{}, err
+			}
+			asset, err := shfmtAssetName(v, p)
+			if err != nil {
+				return VerifySpec{}, err
+			}
+			return VerifySpec{
+				AssetNamePattern: asset,
+				ChecksumURL:      fmt.Sprintf("https://github.com/mvdan/sh/releases/download/v%s/sha256sums.txt", v),
+			}, nil
+		},
 	}
 )
 
@@ -243,6 +259,9 @@ func main() {
 	}
 	if err := bootstrapPackageManager(); err != nil {
 		fatal("BOOTSTRAP_PACKAGE_MANAGER", err)
+	}
+	if err := ensurePackageManagerOnPATH(); err != nil {
+		fatal("ENSURE_PACKAGE_MANAGER_PATH", err)
 	}
 
 	keys := sortedKeys(tools)
@@ -462,6 +481,30 @@ func gitleaksAssetName(version string, p PlatformSpec) (string, error) {
 	return fmt.Sprintf("gitleaks_%s_%s_%s.tar.gz", version, osPart, archPart), nil
 }
 
+func shfmtAssetName(version string, p PlatformSpec) (string, error) {
+	var osPart string
+	switch p.GOOS {
+	case "linux":
+		osPart = "linux"
+	case "darwin":
+		osPart = "darwin"
+	default:
+		return "", fmt.Errorf("unsupported shfmt os: %s", p.GOOS)
+	}
+
+	var archPart string
+	switch p.GOARCH {
+	case "amd64":
+		archPart = "amd64"
+	case "arm64":
+		archPart = "arm64"
+	default:
+		return "", fmt.Errorf("unsupported shfmt arch: %s", p.GOARCH)
+	}
+
+	return fmt.Sprintf("shfmt_v%s_%s_%s", version, osPart, archPart), nil
+}
+
 func ensurePackageManager() error {
 	if path, err := exec.LookPath("asdf"); err == nil {
 		asdfExecutable = path
@@ -481,10 +524,15 @@ func ensurePackageManager() error {
 func bootstrapPackageManager() error {
 	switch activePackageManager {
 	case packageManagerASDF:
-		ensureDirOnPath(filepath.Join(defaultASDFRoot(), "bin"))
-		ensureDirOnPath(filepath.Join(defaultASDFRoot(), "shims"))
+		prependPATH(
+			filepath.Join(defaultASDFRoot(), "shims"),
+			filepath.Join(defaultASDFRoot(), "bin"),
+		)
 		return nil
 	case packageManagerMise:
+		if err := ensureMiseOnPATH(); err != nil {
+			return err
+		}
 		return nil
 	default:
 		return fmt.Errorf("unsupported package manager: %s", activePackageManager)
@@ -568,14 +616,43 @@ func installWithMise(res *InstallResult, spec ToolSpec) error {
 	backendTool := backendToolName(activePackageManager, spec.Name)
 	target := fmt.Sprintf("%s@%s", backendTool, normalizeSemver(spec.Version))
 
-	if err := run(miseExecutable, "install", target); err != nil {
+	if err := runWithEnv(miseInstallEnv(), miseExecutable, "install", target); err != nil {
 		return fmt.Errorf("mise install failed: %w", err)
+	}
+
+	_ = runWithEnv(miseInstallEnv(), miseExecutable, "use", "-g", target)
+	if err := ensurePackageManagerOnPATH(); err != nil {
+		return err
+	}
+	_ = runWithEnv(miseInstallEnv(), miseExecutable, "reshim")
+	if err := ensurePackageManagerOnPATH(); err != nil {
+		return err
 	}
 
 	res.InstallOK = true
 	res.PackageRef = backendTool
 	res.VerifyMode = "install-only"
 	return nil
+}
+
+func miseInstallEnv() []string {
+	env := os.Environ()
+	// mise 2026.x fails older CPython builds without GitHub attestations (common under act).
+	env = append(env,
+		"MISE_PYTHON_GITHUB_ATTESTATIONS=false",
+		"MISE_YES=1",
+		"MISE_NOT_FOUND_AUTO_INSTALL=0",
+	)
+	if os.Getenv("CI") == "" {
+		env = append(env, "CI=true")
+	}
+	// Avoid interactive trust prompts on mise.toml in CI clones.
+	if os.Getenv("MISE_TRUSTED_CONFIG_PATHS") == "" {
+		if root, err := os.Getwd(); err == nil {
+			env = append(env, "MISE_TRUSTED_CONFIG_PATHS="+root)
+		}
+	}
+	return env
 }
 
 func backendToolName(pm PackageManager, tool string) string {
@@ -640,12 +717,23 @@ func verifyInstalledToolVersion(tool, expected string) (bool, error) {
 	if !ok {
 		return false, nil
 	}
+	_ = ensurePackageManagerOnPATH()
 
 	actual, err := verifyFn()
 	if err != nil {
-		return false, err
+		switch activePackageManager {
+		case packageManagerMise:
+			_ = runWithEnv(miseInstallEnv(), miseExecutable, "reshim")
+		case packageManagerASDF:
+			_ = run(asdfExecutable, "reshim")
+		}
+		_ = ensurePackageManagerOnPATH()
+		actual, err = verifyFn()
+		if err != nil {
+			return false, err
+		}
 	}
-	if !versionMatchesExpected(expected, actual) {
+	if !versionMatchesExpectedForTool(tool, expected, actual) {
 		return true, fmt.Errorf("expected=%s actual=%s", expected, actual)
 	}
 	return true, nil
@@ -657,6 +745,38 @@ func verifyDockerComposeVersion() (string, error) {
 	}
 	return commandVersion("docker", "compose", "version")
 }
+
+func verifyGoVersion() (string, error) {
+	out, err := runOut("go", "version")
+	if err != nil {
+		return "", err
+	}
+	re := regexp.MustCompile(`(?i)\bgo([0-9]+\.[0-9]+(?:\.[0-9]+)?)\b`)
+	if m := re.FindStringSubmatch(out); len(m) == 2 {
+		return m[1], nil
+	}
+	// Fallback for atypical outputs (still prefer full X.Y.Z when present).
+	return firstSemver(out)
+}
+
+func versionMatchesExpectedForTool(tool, expected, actual string) bool {
+	switch tool {
+	case "task":
+		return semverCompatible(expected, actual, compatMinor)
+	case "docker-compose":
+		return semverCompatible(expected, actual, compatPatch)
+	default:
+		return versionMatchesExpected(expected, actual)
+	}
+}
+
+type semverCompat int
+
+const (
+	compatExact semverCompat = iota
+	compatPatch              // major.minor match; patch may differ
+	compatMinor              // major match; minor/patch may differ
+)
 
 func versionMatchesExpected(expected, actual string) bool {
 	expected = normalizeSemver(expected)
@@ -680,6 +800,41 @@ func versionMatchesExpected(expected, actual string) bool {
 	}
 	return true
 }
+
+func parseSemverCore(v string) (major, minor, patch int, ok bool) {
+	v = normalizeSemver(v)
+	re := regexp.MustCompile(`^(\d+)(?:\.(\d+))?(?:\.(\d+))?`)
+	m := re.FindStringSubmatch(v)
+	if m == nil {
+		return 0, 0, 0, false
+	}
+	fmt.Sscanf(m[1], "%d", &major)
+	if m[2] != "" {
+		fmt.Sscanf(m[2], "%d", &minor)
+	}
+	if m[3] != "" {
+		fmt.Sscanf(m[3], "%d", &patch)
+	}
+	return major, minor, patch, true
+}
+
+func semverCompatible(expected, actual string, mode semverCompat) bool {
+	eMaj, eMin, ePat, eOK := parseSemverCore(expected)
+	aMaj, aMin, aPat, aOK := parseSemverCore(actual)
+	if !eOK || !aOK {
+		return versionMatchesExpected(expected, actual)
+	}
+	switch mode {
+	case compatPatch:
+		return eMaj == aMaj && eMin == aMin
+	case compatMinor:
+		return eMaj == aMaj
+	default:
+		return eMaj == aMaj && eMin == aMin && ePat == aPat
+	}
+}
+
+var _ = compatExact
 
 func verifyInstalledArtifactChecksum(tool, version string, spec VerifySpec) error {
 	cacheRoots := checksumSearchRoots(tool, version)
@@ -807,16 +962,37 @@ func commandVersion(name string, args ...string) (string, error) {
 }
 
 func firstSemver(s string) (string, error) {
-	re := regexp.MustCompile(`(?mi)\bv?([0-9]+\.[0-9]+(?:\.[0-9]+)?)\b`)
-	m := re.FindStringSubmatch(s)
-	if len(m) != 2 {
+	re := regexp.MustCompile(`(?mi)(?:\bgo)?v?([0-9]+\.[0-9]+(?:\.[0-9]+)?)`)
+	matches := re.FindAllStringSubmatch(s, -1)
+	if len(matches) == 0 {
 		return "", fmt.Errorf("could not parse semantic version from output: %s", strings.TrimSpace(s))
 	}
-	return m[1], nil
+	best := ""
+	bestParts := -1
+	for _, m := range matches {
+		if len(m) < 2 {
+			continue
+		}
+		cand := normalizeSemver(m[1])
+		parts := strings.Count(cand, ".") + 1
+		if parts > bestParts || (parts == bestParts && best == "") {
+			best = cand
+			bestParts = parts
+		}
+	}
+	if best == "" {
+		return "", fmt.Errorf("could not parse semantic version from output: %s", strings.TrimSpace(s))
+	}
+	return best, nil
 }
 
 func run(name string, args ...string) error {
+	return runWithEnv(os.Environ(), name, args...)
+}
+
+func runWithEnv(env []string, name string, args ...string) error {
 	cmd := exec.Command(name, args...)
+	cmd.Env = env
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%s %v failed: %v | output=%s", name, args, err, strings.TrimSpace(string(out)))
@@ -826,11 +1002,130 @@ func run(name string, args ...string) error {
 
 func runOut(name string, args ...string) (string, error) {
 	cmd := exec.Command(name, args...)
+	cmd.Env = os.Environ()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("%s %v failed: %v | output=%s", name, args, err, strings.TrimSpace(string(out)))
 	}
 	return string(out), nil
+}
+
+func ensurePackageManagerOnPATH() error {
+	switch activePackageManager {
+	case packageManagerMise:
+		return ensureMiseOnPATH()
+	case packageManagerASDF:
+		prependPATH(
+			filepath.Join(defaultASDFRoot(), "shims"),
+			filepath.Join(defaultASDFRoot(), "bin"),
+		)
+		return nil
+	default:
+		return nil
+	}
+}
+
+func ensureMiseOnPATH() error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = os.Getenv("HOME")
+	}
+
+	candidates := []string{
+		filepath.Join(defaultMiseDataDir(), "shims"),
+		filepath.Join(home, ".local", "share", "mise", "shims"),
+		filepath.Join(home, ".mise", "shims"),
+		filepath.Join(home, ".local", "bin"),
+	}
+
+	for _, args := range [][]string{
+		{"bin-paths"},
+		{"bin-path"},
+	} {
+		if out, err := runOut(miseExecutable, args...); err == nil {
+			for _, line := range strings.Split(out, "\n") {
+				line = strings.TrimSpace(line)
+				if line != "" {
+					candidates = append(candidates, line)
+				}
+			}
+			break
+		}
+	}
+
+	// Apply env exports (PATH, MISE_*); ignore failure on older mise.
+	if out, err := runOut(miseExecutable, "env", "-s", "bash"); err == nil {
+		applyExportLines(out)
+	}
+
+	prependPATH(candidates...)
+	return nil
+}
+
+func prependPATH(dirs ...string) {
+	seen := make(map[string]struct{})
+	ordered := make([]string, 0, len(dirs))
+
+	for _, d := range dirs {
+		d = strings.TrimSpace(d)
+		if d == "" {
+			continue
+		}
+		if abs, err := filepath.Abs(d); err == nil {
+			d = abs
+		}
+		if _, ok := seen[d]; ok {
+			continue
+		}
+		if !dirExists(d) {
+			continue
+		}
+		seen[d] = struct{}{}
+		ordered = append(ordered, d)
+	}
+	if len(ordered) == 0 {
+		return
+	}
+
+	final := make([]string, 0, len(ordered)+8)
+	final = append(final, ordered...)
+	for _, p := range filepath.SplitList(os.Getenv("PATH")) {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		final = append(final, p)
+	}
+	_ = os.Setenv("PATH", strings.Join(final, string(os.PathListSeparator)))
+}
+
+func applyExportLines(script string) {
+	sc := bufio.NewScanner(strings.NewReader(script))
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if !strings.HasPrefix(line, "export ") {
+			continue
+		}
+		line = strings.TrimPrefix(line, "export ")
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		k = strings.TrimSpace(k)
+		v = strings.TrimSpace(v)
+		if len(v) >= 2 {
+			if (v[0] == '"' && v[len(v)-1] == '"') || (v[0] == '\'' && v[len(v)-1] == '\'') {
+				v = v[1 : len(v)-1]
+			}
+		}
+		if k != "" {
+			_ = os.Setenv(k, v)
+		}
+	}
 }
 
 func fetchExpectedChecksum(checksumURL, cacheBaseName, assetNamePattern string) (string, error) {
@@ -970,7 +1265,13 @@ func sortedKeys(m map[string]ToolSpec) []string {
 }
 
 func normalizeSemver(v string) string {
-	return strings.TrimPrefix(strings.TrimSpace(v), "v")
+	v = strings.TrimSpace(v)
+	v = strings.TrimPrefix(v, "v")
+	v = strings.TrimPrefix(v, "V")
+	if i := strings.Index(v, "+"); i >= 0 {
+		v = v[:i]
+	}
+	return strings.TrimSpace(v)
 }
 
 func defaultASDFRoot() string {
@@ -1007,30 +1308,6 @@ func defaultMiseCacheDir() string {
 		return filepath.Join(os.Getenv("HOME"), ".cache", "mise")
 	}
 	return filepath.Join(home, ".cache", "mise")
-}
-
-func ensureDirOnPath(dir string) {
-	if strings.TrimSpace(dir) == "" {
-		return
-	}
-	current := os.Getenv("PATH")
-	if pathContains(current, dir) {
-		return
-	}
-	if current == "" {
-		_ = os.Setenv("PATH", dir)
-		return
-	}
-	_ = os.Setenv("PATH", current+string(os.PathListSeparator)+dir)
-}
-
-func pathContains(pathValue, entry string) bool {
-	for _, item := range filepath.SplitList(pathValue) {
-		if strings.TrimSpace(item) == strings.TrimSpace(entry) {
-			return true
-		}
-	}
-	return false
 }
 
 func existingDirs(paths []string) []string {

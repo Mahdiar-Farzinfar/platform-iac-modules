@@ -71,11 +71,12 @@ repos:
       - id: check-shebang-scripts-are-executable
 
   - repo: https://github.com/adrienverge/yamllint.git
-    rev: v1.36.1
+    rev: v1.38.0
     hooks:
       - id: yamllint
-        files: \.ya?ml$
-        args: [-c, tooling/.yamllint.yml]
+        args: ['-c', 'tooling/.yamllint.yml']
+        types: [file, yaml]
+        language: python
 
   - repo: https://github.com/rhysd/actionlint
     rev: v1.7.7

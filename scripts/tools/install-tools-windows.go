@@ -75,6 +75,7 @@ var (
 		"markdownlint":   "main/markdownlint-cli2",
 		"task":           "main/task",
 		"just":           "main/just",
+		"shfmt":          "main/shfmt",
 		"docker-cli":     "main/docker",
 		"docker-compose": "main/docker-compose",
 	}
@@ -92,6 +93,7 @@ var (
 		"actionlint":     "rhysd.actionlint",
 		"task":           "GoTask.Task",
 		"just":           "Casey.Just",
+		"shfmt":          "mvdan.Shfmt",
 		"docker-cli":     "Docker.DockerCLI",
 		"docker-compose": "Docker.Compose",
 	}
@@ -132,6 +134,14 @@ var (
 				ChecksumURL:      fmt.Sprintf("https://github.com/gitleaks/gitleaks/releases/download/v%s/gitleaks_%s_checksums.txt", v, v),
 			}, nil
 		},
+		"shfmt": func(v string) (VerifySpec, error) {
+			v = normalizeSemver(v)
+			return VerifySpec{
+				// Upstream (mvdan/sh) ships a bare Windows binary, not a zip.
+				AssetNamePattern: fmt.Sprintf("shfmt_v%s_windows_amd64.exe", v),
+				ChecksumURL:      fmt.Sprintf("https://github.com/mvdan/sh/releases/download/v%s/sha256sums.txt", v),
+			}, nil
+		},
 	}
 
 	toolVersionVerifiers = map[string]func() (string, error){
@@ -150,6 +160,7 @@ var (
 		"markdownlint":   func() (string, error) { return commandVersion("markdownlint-cli2", "--version") },
 		"task":           func() (string, error) { return commandVersion("task", "--version") },
 		"just":           func() (string, error) { return commandVersion("just", "--version") },
+		"shfmt":          func() (string, error) { return commandVersion("shfmt", "--version") },
 		"docker-cli":     func() (string, error) { return commandVersion("docker", "--version") },
 		"docker-compose": func() (string, error) { return commandVersion("docker-compose", "--version") },
 	}

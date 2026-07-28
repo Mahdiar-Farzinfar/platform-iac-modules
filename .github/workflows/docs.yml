@@ -59,36 +59,24 @@ jobs:
             exit 1
           fi
 
-          task_version="$(awk '$1 == "task" { print $2; exit }' "${TOOL_VERSIONS_FILE}")"
           terraform_docs_version="$(awk '$1 == "terraform-docs" { print $2; exit }' "${TOOL_VERSIONS_FILE}")"
-
-          if [[ -z "${task_version}" ]]; then
-            echo "::error::task version is not defined in ${TOOL_VERSIONS_FILE}"
-            exit 1
-          fi
 
           if [[ -z "${terraform_docs_version}" ]]; then
             echo "::error::terraform-docs version is not defined in ${TOOL_VERSIONS_FILE}"
             exit 1
           fi
 
-          task_version="${task_version#v}"
           terraform_docs_version="${terraform_docs_version#v}"
 
-          echo "task_version=${task_version}" >> "${GITHUB_OUTPUT}"
-          echo "terraform_docs_version=${terraform_docs_version}" >> "${GITHUB_OUTPUT}"
-          echo "terraform_docs_tag=v${terraform_docs_version}" >> "${GITHUB_OUTPUT}"
-
-      - name: "Install Task"
-        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
-        with:
-          version: ${{ steps.versions.outputs.task_version }}
+          {
+            echo "terraform_docs_version=${terraform_docs_version}"
+            echo "terraform_docs_tag=v${terraform_docs_version}"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: "Install terraform-docs"
         run: |
           set -euo pipefail
 
-          version="${{ steps.versions.outputs.terraform_docs_version }}"
           tag="${{ steps.versions.outputs.terraform_docs_tag }}"
           archive="terraform-docs-${tag}-linux-amd64.tar.gz"
           checksum_file="terraform-docs-${tag}.sha256sum"
@@ -115,26 +103,47 @@ jobs:
           install -m 0755 terraform-docs "${install_dir}/terraform-docs"
 
           echo "${install_dir}" >> "${GITHUB_PATH}"
-          "${install_dir}/terraform-docs" --version
+          export PATH="${install_dir}:${PATH}"
+
+          command -v terraform-docs >/dev/null
+          terraform-docs --version
+          rm -f "${archive}" "${checksum_file}" terraform-docs
 
       - name: "Generate documentation"
-        run: task docs
+        run: |
+          set -euo pipefail
+          # Uses repo-root .terraform-docs.yml as configuration SoT.
+          # Adjust paths only if your modules layout differs.
+          if [[ -d modules ]]; then
+            while IFS= read -r -d '' module_dir; do
+              echo "Generating docs for: ${module_dir}"
+              command -v terraform-docs >/dev/null
+              terraform-docs markdown table --config ".terraform-docs.yml" --output-file README.md --output-mode inject "${module_dir}"
+            done < <(find modules -mindepth 1 -maxdepth 3 -type d -print0)
+          fi
+
+          if compgen -G "*.tf" > /dev/null; then
+            echo "Generating docs for repository root"
+            terraform-docs markdown table --config ".terraform-docs.yml" --output-file README.md --output-mode inject .
+          fi
 
       - name: "Detect documentation drift"
         id: drift
         run: |
           set -euo pipefail
 
-          if task docs:check; then
+          if git diff --quiet -- README.md modules; then
             echo "drifted=false" >> "${GITHUB_OUTPUT}"
           else
+            echo "::warning::Documentation drift detected"
+            git --no-pager diff -- README.md modules || true
             echo "drifted=true" >> "${GITHUB_OUTPUT}"
           fi
 
       - name: "Fail PR when docs drift exists"
         if: github.event_name == 'pull_request' && steps.drift.outputs.drifted == 'true'
         run: |
-          echo "::error::Generated documentation is out of date. Run 'task docs' and commit the result."
+          echo "::error::Generated documentation is out of date. Run terraform-docs locally (same config/version as tooling/.tool-versions) and commit the result."
           exit 1
 
   create-docs-pr:
@@ -168,36 +177,24 @@ jobs:
             exit 1
           fi
 
-          task_version="$(awk '$1 == "task" { print $2; exit }' "${TOOL_VERSIONS_FILE}")"
           terraform_docs_version="$(awk '$1 == "terraform-docs" { print $2; exit }' "${TOOL_VERSIONS_FILE}")"
-
-          if [[ -z "${task_version}" ]]; then
-            echo "::error::task version is not defined in ${TOOL_VERSIONS_FILE}"
-            exit 1
-          fi
 
           if [[ -z "${terraform_docs_version}" ]]; then
             echo "::error::terraform-docs version is not defined in ${TOOL_VERSIONS_FILE}"
             exit 1
           fi
 
-          task_version="${task_version#v}"
           terraform_docs_version="${terraform_docs_version#v}"
 
-          echo "task_version=${task_version}" >> "${GITHUB_OUTPUT}"
-          echo "terraform_docs_version=${terraform_docs_version}" >> "${GITHUB_OUTPUT}"
-          echo "terraform_docs_tag=v${terraform_docs_version}" >> "${GITHUB_OUTPUT}"
-
-      - name: "Install Task"
-        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
-        with:
-          version: ${{ steps.versions.outputs.task_version }}
+          {
+            echo "terraform_docs_version=${terraform_docs_version}"
+            echo "terraform_docs_tag=v${terraform_docs_version}"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: "Install terraform-docs"
         run: |
           set -euo pipefail
 
-          version="${{ steps.versions.outputs.terraform_docs_version }}"
           tag="${{ steps.versions.outputs.terraform_docs_tag }}"
           archive="terraform-docs-${tag}-linux-amd64.tar.gz"
           checksum_file="terraform-docs-${tag}.sha256sum"
@@ -224,10 +221,28 @@ jobs:
           install -m 0755 terraform-docs "${install_dir}/terraform-docs"
 
           echo "${install_dir}" >> "${GITHUB_PATH}"
-          "${install_dir}/terraform-docs" --version
+          export PATH="${install_dir}:${PATH}"
+
+          command -v terraform-docs >/dev/null
+          terraform-docs --version
+          rm -f "${archive}" "${checksum_file}" terraform-docs
 
       - name: "Generate documentation"
-        run: task docs
+        run: |
+          set -euo pipefail
+
+          if [[ -d modules ]]; then
+            while IFS= read -r -d '' module_dir; do
+              echo "Generating docs for: ${module_dir}"
+              command -v terraform-docs >/dev/null
+              terraform-docs markdown table --config ".terraform-docs.yml" --output-file README.md --output-mode inject "${module_dir}"
+            done < <(find modules -mindepth 1 -maxdepth 3 -type d -print0)
+          fi
+
+          if compgen -G "*.tf" > /dev/null; then
+            echo "Generating docs for repository root"
+            terraform-docs markdown table --config ".terraform-docs.yml" --output-file README.md --output-mode inject .
+          fi
 
       - name: "Create pull request for generated docs"
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1  # v8.1.1
@@ -244,6 +259,7 @@ jobs:
 
             - Generated automatically by the documentation pipeline
             - Source of truth: Terraform modules and `.terraform-docs.yml`
+            - Tool version SoT: `tooling/.tool-versions` (`terraform-docs`)
           labels: |
             documentation
             automation
