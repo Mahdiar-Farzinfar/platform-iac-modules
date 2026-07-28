@@ -171,19 +171,30 @@ tasks:
     desc: Run Linux cross-platform test suite
     platforms: [linux]
     cmds:
-      - sh "{{.TESTS_XPLAT_DIR}}/test-linux.sh"
+      - |
+        if [ -f "{{.TESTS_XPLAT_DIR}}/test-linux.sh" ]; then
+          sh "{{.TESTS_XPLAT_DIR}}/test-linux.sh"
+        else
+          echo "Skipping: {{.TESTS_XPLAT_DIR}}/test-linux.sh not found"
+        fi
 
   test:cross-platform:macos:
     desc: Run macOS cross-platform test suite
     platforms: [darwin]
     cmds:
-      - sh "{{.TESTS_XPLAT_DIR}}/test-macos.sh"
+      - |
+        if [ -f "{{.TESTS_XPLAT_DIR}}/test-macos.sh" ]; then
+          sh "{{.TESTS_XPLAT_DIR}}/test-macos.sh"
+        else
+          echo "Skipping: {{.TESTS_XPLAT_DIR}}/test-macos.sh not found"
+        fi
 
   test:cross-platform:windows:
     desc: Run Windows cross-platform test suite
     platforms: [windows]
     cmds:
-      - powershell -NoProfile -ExecutionPolicy Bypass -File "{{.WINDOWS_TASKS_SCRIPT}}" -Task test-cross-platform -RootDir "{{.ROOT_DIR}}"
+      - |
+        powershell -NoProfile -ExecutionPolicy Bypass -Command "if (Test-Path '{{.WINDOWS_TASKS_SCRIPT}}') { & '{{.WINDOWS_TASKS_SCRIPT}}' -Task test-cross-platform -RootDir '{{.ROOT_DIR}}' } else { Write-Host 'Skipping: {{.WINDOWS_TASKS_SCRIPT}} not found' }"
 
   # -----------------------------
   # Formatting

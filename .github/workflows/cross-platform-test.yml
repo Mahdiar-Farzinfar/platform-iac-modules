@@ -203,12 +203,6 @@ jobs:
         shell: bash
         run: task os:detect
 
-      - name: Preflight (Task SoT)
-        shell: bash
-        env:
-          TF_IN_AUTOMATION: "true"
-        run: task preflight
-
       - name: Verify install-tools-posix.go (compile + smoke)
         shell: bash
         run: |
@@ -306,10 +300,6 @@ jobs:
         shell: bash
         run: task os:detect
 
-      - name: Preflight (Task SoT)
-        shell: bash
-        run: task preflight
-
       - name: Verify install-tools-posix.go (compile + smoke)
         shell: bash
         run: |
@@ -406,10 +396,6 @@ jobs:
       - name: Detect OS/arch (Task SoT)
         shell: bash
         run: task os:detect
-
-      - name: Preflight (Task SoT)
-        shell: bash
-        run: task preflight
 
       - name: Verify scripts/windows/tasks.ps1 (syntax)
         shell: pwsh

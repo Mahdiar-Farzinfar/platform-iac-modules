@@ -23,6 +23,8 @@ jobs:
   validate:
     name: PR Validate
     runs-on: ubuntu-24.04
+    outputs:
+      sarif_exists: ${{ steps.sarif_check.outputs.exists }}
     timeout-minutes: 45
 
     permissions:
@@ -104,6 +106,12 @@ jobs:
       - name: Run CI gate
         run: task ci
 
+      - name: Check SARIF presence
+        id: sarif_check
+        if: always()
+        run: |
+          if [[ -f results.sarif ]]; then echo "exists=true" >> "$GITHUB_OUTPUT"; else echo "exists=false" >> "$GITHUB_OUTPUT"; fi
+
       - name: Upload SARIF artifact
         if: always() && hashFiles('results.sarif') != ''
         uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808  # v4.3.3
@@ -117,22 +125,19 @@ jobs:
     name: Upload SARIF
     runs-on: ubuntu-24.04
     needs: validate
-    if: always()
+    if: always() && needs.validate.outputs.sarif_exists == 'true'
 
     permissions:
       security-events: write
 
     steps:
       - name: Download SARIF artifact
-        id: download_sarif
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
-        continue-on-error: true
         with:
           name: pr-validation-sarif
           path: .
 
       - name: Upload SARIF to GitHub
-        if: steps.download_sarif.outcome == 'success'
         uses: github/codeql-action/upload-sarif@54f647b7e1bb85c95cddabcd46b0c578ec92bc1a  # v4.36.3
         with:
           sarif_file: results.sarif

@@ -213,7 +213,8 @@ jobs:
           fi
           if [[ -n "${ASDF_DATA_DIR:-}" ]]; then
             echo "${ASDF_DATA_DIR}/shims" >> "${GITHUB_PATH}"
-            echo "${ASDF_DATA_DIR}/bin" >> "${GITHUB_PATH}"          fi
+            echo "${ASDF_DATA_DIR}/bin" >> "${GITHUB_PATH}"
+          fi
           if [[ -d "${HOME}/.local/share/mise/shims" ]]; then
             echo "${HOME}/.local/share/mise/shims" >> "${GITHUB_PATH}"
           fi
