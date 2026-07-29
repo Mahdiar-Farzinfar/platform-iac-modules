@@ -227,7 +227,15 @@ tasks:
     platforms: [windows]
     cmds:
       - |
-        powershell -NoProfile -ExecutionPolicy Bypass -Command "if (Test-Path '{{.WINDOWS_TASKS_SCRIPT}}') { & '{{.WINDOWS_TASKS_SCRIPT}}' -Task test-cross-platform -RootDir '{{.ROOT_DIR}}' } else { Write-Host 'Skipping: {{.WINDOWS_TASKS_SCRIPT}} not found' }"
+        powershell -NoProfile -ExecutionPolicy Bypass -Command "
+          \$testScript = Join-Path '{{.TESTS_XPLAT_DIR}}' 'test-windows.ps1'
+
+          if (Test-Path \$testScript) {
+            & '{{.WINDOWS_TASKS_SCRIPT}}' -Task test-cross-platform -RootDir '{{.ROOT_DIR}}'
+          } else {
+            Write-Host \"Skipping: \$testScript not found\"
+          }
+        "
 
   # -----------------------------
   # Formatting

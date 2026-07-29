@@ -277,7 +277,7 @@ jobs:
       - name: Sanity-check required CLIs on PATH
         run: |
           set -euo pipefail
-          for bin in terraform tflint trivy golangci-lint gitleaks go python3 git node npm yamllint markdownlint task; do
+          for bin in terraform tflint trivy golangci-lint gitleaks go python3 git node npm yamllint markdownlint-cli2 task; do
             if ! command -v "${bin}" >/dev/null 2>&1; then
               echo "::error::Required tool '${bin}' is not on PATH after bootstrap"
               exit 1
