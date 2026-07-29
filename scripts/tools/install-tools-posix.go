@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -801,19 +802,30 @@ func versionMatchesExpected(expected, actual string) bool {
 	return true
 }
 
+var semverCoreRE = regexp.MustCompile(`^(\d+)(?:\.(\d+))?(?:\.(\d+))?`)
+
 func parseSemverCore(v string) (major, minor, patch int, ok bool) {
 	v = normalizeSemver(v)
-	re := regexp.MustCompile(`^(\d+)(?:\.(\d+))?(?:\.(\d+))?`)
-	m := re.FindStringSubmatch(v)
+	m := semverCoreRE.FindStringSubmatch(v)
 	if m == nil {
 		return 0, 0, 0, false
 	}
-	fmt.Sscanf(m[1], "%d", &major)
+	var err error
+	major, err = strconv.Atoi(m[1])
+	if err != nil {
+		return 0, 0, 0, false
+	}
 	if m[2] != "" {
-		fmt.Sscanf(m[2], "%d", &minor)
+		minor, err = strconv.Atoi(m[2])
+		if err != nil {
+			return 0, 0, 0, false
+		}
 	}
 	if m[3] != "" {
-		fmt.Sscanf(m[3], "%d", &patch)
+		patch, err = strconv.Atoi(m[3])
+		if err != nil {
+			return 0, 0, 0, false
+		}
 	}
 	return major, minor, patch, true
 }
