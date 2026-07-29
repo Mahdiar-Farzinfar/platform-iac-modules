@@ -277,13 +277,15 @@ jobs:
       - name: Sanity-check required CLIs on PATH
         run: |
           set -euo pipefail
+          echo "::group::Sanity-checking required CLIs"
           for bin in terraform tflint trivy golangci-lint gitleaks go python3 git node npm yamllint markdownlint-cli2 task; do
             if ! command -v "${bin}" >/dev/null 2>&1; then
-              echo "::error::Required tool '${bin}' is not on PATH after bootstrap"
+              echo "::error file=.github/workflows/validate.yml::Required tool '${bin}' is not on PATH after bootstrap"
               exit 1
             fi
             echo "OK: ${bin} -> $(command -v "${bin}")"
           done
+          echo "::endgroup::"
           # surface versions for debugging
           terraform version || true
           tflint --version || true
@@ -291,12 +293,24 @@ jobs:
           golangci-lint version || true
 
       - name: Run repo-level pre-commit
+        id: pre-commit
         uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd  # v3.0.1
+        continue-on-error: true   # allow explicit failure reporting below
         with:
-          extra_args: --all-files --show-diff-on-failure
+          extra_args: --all-files --show-diff-on-failure --verbose
+
+      - name: Report pre-commit result
+        if: steps.pre-commit.outcome != 'success'
+        run: |
+          echo "::error::pre-commit failed (see above logs for hook output)"
+          exit 1
 
       - name: Run repo CI gate (non-module)
-        run: task ci
+        run: |
+          set -euo pipefail
+          echo "::group::Executing task ci (repo-level non-module checks)"
+          task ci || { echo "::error::task ci failed with exit code $?"; exit 1; }
+          echo "::endgroup::"
 
       - name: Check SARIF presence
         id: sarif_check
