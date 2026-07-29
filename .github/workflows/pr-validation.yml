@@ -50,12 +50,14 @@ jobs:
           TASK_VERSION="$(awk '$1 == "task" { print $2 }' tooling/.tool-versions | head -n 1)"
           NODE_VERSION="$(awk '$1 == "nodejs" { print $2 }' tooling/.tool-versions | head -n 1)"
           GITLEAKS_VERSION="$(awk '$1 == "gitleaks" { print $2 }' tooling/.tool-versions | head -n 1)"
+          GOLANGCI_LINT_VERSION="$(awk '$1 == "golangci-lint" { print $2 }' tooling/.tool-versions | head -n 1)"
 
           [[ -n "${TERRAFORM_VERSION}" ]] || { echo "Terraform version is missing"; exit 1; }
           [[ -n "${PYTHON_VERSION}" ]] || { echo "Python version is missing"; exit 1; }
           [[ -n "${TASK_VERSION}" ]] || { echo "Task version is missing"; exit 1; }
           [[ -n "${NODE_VERSION}" ]] || { echo "Node.js version is missing"; exit 1; }
           [[ -n "${GITLEAKS_VERSION}" ]] || { echo "Gitleaks version is missing"; exit 1; }
+          [[ -n "${GOLANGCI_LINT_VERSION}" ]] || { echo "golangci-lint version is missing"; exit 1; }
 
           {
             echo "terraform=${TERRAFORM_VERSION}"
@@ -63,6 +65,7 @@ jobs:
             echo "task=${TASK_VERSION}"
             echo "node=${NODE_VERSION}"
             echo "gitleaks=${GITLEAKS_VERSION}"
+            echo "golangci-lint=${GOLANGCI_LINT_VERSION}"
           } >> "$GITHUB_OUTPUT"
 
       - name: Setup Go
@@ -112,6 +115,33 @@ jobs:
           rm -f "${TARBALL}" gitleaks
 
           gitleaks version
+
+      - name: Install golangci-lint
+        env:
+          GOLANGCI_LINT_VERSION: ${{ steps.tool_versions.outputs.golangci-lint }}
+        run: |
+          ARCH="$(uname -m)"
+          case "${ARCH}" in
+            x86_64) GL_ARCH="amd64" ;;
+            aarch64|arm64) GL_ARCH="arm64" ;;
+            *) echo "Unsupported architecture: ${ARCH}"; exit 1 ;;
+          esac
+
+          VERSION="${GOLANGCI_LINT_VERSION#v}"
+
+          TARBALL="golangci-lint-${VERSION}-linux-${GL_ARCH}.tar.gz"
+          BASE_URL="https://github.com/golangci/golangci-lint/releases/download/v${VERSION}"
+
+          curl -fsSL -o "${TARBALL}" "${BASE_URL}/${TARBALL}"
+          tar -xzf "${TARBALL}" "golangci-lint-${VERSION}-linux-${GL_ARCH}/golangci-lint"
+          sudo install -m 0755 \
+            "golangci-lint-${VERSION}-linux-${GL_ARCH}/golangci-lint" \
+            /usr/local/bin/golangci-lint
+
+          rm -rf "${TARBALL}" "golangci-lint-${VERSION}-linux-${GL_ARCH}"
+
+          command -v golangci-lint >/dev/null
+          golangci-lint version
 
       - name: Install CI utilities
         run: |
