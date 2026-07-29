@@ -471,14 +471,25 @@ func installWithWinget(res *InstallResult, tool string, spec ToolSpec) error {
 		res.ChecksumOK = false
 		return nil
 	}
+
+	if tool == "docker-cli" || tool == "docker-compose" {
+		if err := installDockerRelatedFallback(res, tool, spec); err != nil {
+			return fmt.Errorf("docker fallback install failed for %s@%s: %w", tool, spec.Version, err)
+		}
+		return nil
+	}
+
 	if err := wingetInstallVersioned(res.PackageRef, spec.Version); err != nil {
 		// Catalog gaps / wrong IDs / missing versions → direct release install when possible.
 		if _, supported := verifyBuilders[tool]; supported {
 			if ferr := installFromGitHubRelease(res, tool, spec); ferr != nil {
 				return fmt.Errorf("winget install failed: %w (github fallback: %v)", err, ferr)
 			}
+			return nil
 		} else if ferr := installWingetFallbackBinary(res, tool, spec); ferr != nil {
-			return fmt.Errorf("winget install failed: %w", err)
+			return fmt.Errorf("winget install failed: %w | fallback: %v", err, ferr)
+		} else {
+			return nil
 		}
 	}
 
@@ -504,6 +515,9 @@ func installWithWinget(res *InstallResult, tool string, spec ToolSpec) error {
 				}
 				return nil
 			}
+		}
+		if ferr := installWingetFallbackBinary(res, tool, spec); ferr == nil {
+			return nil
 		}
 		return fmt.Errorf("version verification failed: %w", err)
 	}
@@ -774,6 +788,17 @@ func installDockerRelatedFallback(res *InstallResult, tool string, spec ToolSpec
 		return fmt.Errorf("download %s: %w", a.url, err)
 	}
 
+	if st, statErr := os.Stat(archivePath); statErr != nil {
+		return fmt.Errorf("download missing on disk: %w", statErr)
+	} else if st.Size() < 1024 {
+		return fmt.Errorf("download too small (%d bytes) for %s — version %s likely unavailable at %s", st.Size(), tool, v, a.url)
+	}
+	if a.zip {
+		if _, zerr := zip.OpenReader(archivePath); zerr != nil {
+			return fmt.Errorf("downloaded asset is not a valid zip (%s): %w", a.url, zerr)
+		}
+	}
+
 	if a.sumURL != "" {
 		if sum, err := fileSHA256(archivePath); err == nil {
 			if want, werr := lookupChecksum(a.sumURL, a.sumName); werr == nil && strings.EqualFold(sum, want) {
@@ -798,18 +823,62 @@ func installDockerRelatedFallback(res *InstallResult, tool string, spec ToolSpec
 		return err
 	}
 
+	if st, err := os.Stat(dest); err != nil || st.Size() == 0 {
+		return fmt.Errorf("extracted binary missing/empty: %s", dest)
+	}
+
+	if err := prependDirToPath(binDir); err != nil {
+		return err
+	}
 	ensureDirOnPath(binDir)
 	res.Backend = string(packageManagerWinget) + "+github"
 	res.PackageRef = a.url
 	res.InstallOK = true
 	res.VerifyMode = "version-only"
 
-	ok, err := verifyInstalledToolVersion(tool, spec.Version)
-	if err != nil {
-		return err
+	args := []string{"--version"}
+	if tool == "docker-compose" {
+		// docker-compose v2+ also supports --version
+		args = []string{"--version"}
 	}
-	res.VersionOK = ok
+	out, err := runOut(dest, args...)
+	if err != nil {
+		return fmt.Errorf("post-install exec failed for %s: %w (output attempt via %s)", tool, err, dest)
+	}
+	actual, err := firstSemver(out)
+	if err != nil {
+		return fmt.Errorf("post-install version parse failed for %s: output=%q: %w", tool, strings.TrimSpace(out), err)
+	}
+	if normalizeSemver(actual) != normalizeSemver(spec.Version) {
+		return fmt.Errorf("post-install version mismatch for %s: expected=%s actual=%s exe=%s", tool, spec.Version, actual, dest)
+	}
+	res.VersionOK = true
 	return nil
+}
+
+func prependDirToPath(dir string) error {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return errors.New("empty dir for PATH prepend")
+	}
+	if st, err := os.Stat(dir); err != nil || !st.IsDir() {
+		return fmt.Errorf("PATH prepend target is not a dir: %s", dir)
+	}
+	clean := filepath.Clean(dir)
+	curr := os.Getenv("PATH")
+	parts := make([]string, 0, 16)
+	parts = append(parts, clean)
+	for _, p := range strings.Split(curr, string(os.PathListSeparator)) {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if strings.EqualFold(filepath.Clean(p), clean) {
+			continue
+		}
+		parts = append(parts, p)
+	}
+	return os.Setenv("PATH", strings.Join(parts, string(os.PathListSeparator)))
 }
 
 func fetchSingleHash(url string) (string, error) {

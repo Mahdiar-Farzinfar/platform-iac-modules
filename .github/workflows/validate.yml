@@ -67,13 +67,13 @@ on:
         type: boolean
 
 concurrency:
-  group: validate-${{ github.workflow }}-${{ github.ref }}
+  group: validate-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
+permissions: {}
 
 env:
+  CI: "true"
   TF_IN_AUTOMATION: "true"
   TF_INPUT: "false"
   TF_CLI_ARGS_init: "-no-color -input=false -backend=false"
@@ -82,6 +82,9 @@ env:
   TOOL_VERSIONS_FILE: "tooling/.tool-versions"
   TERRAFORM_VERSION_FILE: "tooling/.terraform-version"
   TFLINT_CONFIG: "tooling/.tflint.hcl"
+  TASK_X_REMOTE_TASKFILES: "0"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PIP_NO_PYTHON_VERSION_WARNING: "1"
 
 defaults:
   run:
@@ -91,23 +94,33 @@ jobs:
   repo-baseline:
     name: Repo baseline checks
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       go_version: ${{ steps.tool-versions.outputs.go_version }}
       terraform_version: ${{ steps.tool-versions.outputs.terraform_version }}
       python_version: ${{ steps.tool-versions.outputs.python_version }}
       tflint_version: ${{ steps.tool-versions.outputs.tflint_version }}
       terraform_docs_version: ${{ steps.tool-versions.outputs.terraform_docs_version }}
+      task_version: ${{ steps.tool-versions.outputs.task_version }}
+      node_version: ${{ steps.tool-versions.outputs.node_version }}
+      gitleaks_version: ${{ steps.tool-versions.outputs.gitleaks_version }}
+      golangci_lint_version: ${{ steps.tool-versions.outputs.golangci_lint_version }}
+      sarif_exists: ${{ steps.sarif_check.outputs.exists }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@1044a6dea927916f2c38ba5aeffbc0a847b1221a  # v7.0.0
+        with:
+          fetch-depth: 200
+          persist-credentials: false
 
       - name: Install Task
         uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
         with:
           version: 3.x
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
@@ -126,9 +139,13 @@ jobs:
           PY_VER=""
           TFLINT_VER=""
           TFDOCS_VER=""
+          TASK_VER=""
+          NODE_VER=""
+          GITLEAKS_VER=""
+          GOLANGCI_LINT_VER=""
 
           if [[ -f "${TERRAFORM_VERSION_FILE}" ]]; then
-            TF_VER="$(tr -d '[:space:]' < "${TERRAFORM_VERSION_FILE}")"
+            TF_VER="$(tr -d '\r' < "${TERRAFORM_VERSION_FILE}" | xargs)"
           fi
           if [[ -f go.mod ]]; then
             GO_VER="$(awk '/^go / {print $2; exit}' go.mod)"
@@ -137,12 +154,24 @@ jobs:
             PY_VER="$(awk '/^python[[:space:]]+/ {print $2; exit}' "${TOOL_VERSIONS_FILE}" || true)"
             TFLINT_VER="$(awk '/^tflint[[:space:]]+/ {print $2; exit}' "${TOOL_VERSIONS_FILE}" || true)"
             TFDOCS_VER="$(awk '/^terraform-docs[[:space:]]+/ {print $2; exit}' "${TOOL_VERSIONS_FILE}" || true)"
+            TASK_VER="$(awk '$1 == "task" { print $2; exit }' "${TOOL_VERSIONS_FILE}" || true)"
+            NODE_VER="$(awk '$1 == "nodejs" { print $2; exit }' "${TOOL_VERSIONS_FILE}" || true)"
+            GITLEAKS_VER="$(awk '$1 == "gitleaks" { print $2; exit }' "${TOOL_VERSIONS_FILE}" || true)"
+            GOLANGCI_LINT_VER="$(awk '$1 == "golangci-lint" { print $2; exit }' "${TOOL_VERSIONS_FILE}" || true)"
           fi
 
           : "${PY_VER:=3.12}"
 
-          if [[ -z "${TF_VER}" || -z "${GO_VER}" ]]; then
-            echo "::error::Failed to resolve terraform/go versions from canonical files"
+          [[ -n "${TF_VER}" ]] || { echo "::error::Terraform version is missing"; exit 1; }
+          [[ -n "${GO_VER}" ]] || { echo "::error::Go version is missing"; exit 1; }
+          [[ -n "${PY_VER}" ]] || { echo "::error::Python version is missing"; exit 1; }
+          [[ -n "${TASK_VER}" ]] || { echo "::error::Task version is missing"; exit 1; }
+          [[ -n "${NODE_VER}" ]] || { echo "::error::Node.js version is missing"; exit 1; }
+          [[ -n "${GITLEAKS_VER}" ]] || { echo "::error::Gitleaks version is missing"; exit 1; }
+          [[ -n "${GOLANGCI_LINT_VER}" ]] || { echo "::error::golangci-lint version is missing"; exit 1; }
+
+          if [[ -z "${TFLINT_VER}" || -z "${TFDOCS_VER}" ]]; then
+            echo "::warning::tflint/terraform-docs version empty; module jobs may fail if required"
             exit 1
           fi
 
@@ -152,7 +181,16 @@ jobs:
             echo "python_version=${PY_VER}"
             echo "tflint_version=${TFLINT_VER}"
             echo "terraform_docs_version=${TFDOCS_VER}"
+            echo "task_version=${TASK_VER}"
+            echo "node_version=${NODE_VER}"
+            echo "gitleaks_version=${GITLEAKS_VER}"
+            echo "golangci_lint_version=${GOLANGCI_LINT_VER}"
           } >> "${GITHUB_OUTPUT}"
+
+      - name: Setup Task (pinned)
+        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
+        with:
+          version: ${{ steps.tool-versions.outputs.task_version }}
 
       - name: Validate output patterns (Sanitization against Injection)
         id: validate-outputs
@@ -168,6 +206,10 @@ jobs:
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
         with:
           python-version: ${{ steps.tool-versions.outputs.python_version }}
+
+      - name: Fetch base branch (PR)
+        if: github.event_name == 'pull_request'
+        run: git fetch --no-tags --prune --depth=200 origin "${{ github.base_ref }}"
 
       - name: Bootstrap toolchain
         run: |
@@ -235,7 +277,7 @@ jobs:
       - name: Sanity-check required CLIs on PATH
         run: |
           set -euo pipefail
-          for bin in terraform tflint trivy golangci-lint go python3 git; do
+          for bin in terraform tflint trivy golangci-lint gitleaks go python3 git node npm yamllint markdownlint task; do
             if ! command -v "${bin}" >/dev/null 2>&1; then
               echo "::error::Required tool '${bin}' is not on PATH after bootstrap"
               exit 1
@@ -245,11 +287,35 @@ jobs:
           # surface versions for debugging
           terraform version || true
           tflint --version || true
+          gitleaks version || true
+          golangci-lint version || true
 
       - name: Run repo-level pre-commit
         uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd  # v3.0.1
         with:
           extra_args: --all-files --show-diff-on-failure
+
+      - name: Run repo CI gate (non-module)
+        run: task ci
+
+      - name: Check SARIF presence
+        id: sarif_check
+        if: always()
+        run: |
+          if [[ -f results.sarif ]]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload SARIF artifact
+        if: always() && hashFiles('results.sarif') != ''
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808  # v4.3.3
+        with:
+          name: validate-sarif
+          path: results.sarif
+          if-no-files-found: error
+          retention-days: 1
 
   detect-changes:
     name: Detect changed modules
@@ -257,6 +323,8 @@ jobs:
     timeout-minutes: 10
     needs: repo-baseline
     if: needs.repo-baseline.result == 'success'
+    permissions:
+      contents: read
     outputs:
       matrix: ${{ steps.build-matrix.outputs.matrix || '{"include":[]}' }}
       has_changes: ${{ steps.build-matrix.outputs.has_changes || 'false' }}
@@ -265,6 +333,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
@@ -589,17 +658,37 @@ jobs:
             echo "No module-scoped or shared validation-trigger changes detected; executed repository-wide baseline checks only."
           } >> "$GITHUB_STEP_SUMMARY"
 
+  upload-sarif:
+    name: Upload SARIF
+    runs-on: ubuntu-latest
+    needs: repo-baseline
+    if: always() && needs.repo-baseline.outputs.sarif_exists == 'true'
+    permissions:
+      security-events: write
+    steps:
+      - name: Download SARIF artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: validate-sarif
+          path: .
+
+      - name: Upload SARIF to GitHub
+        uses: github/codeql-action/upload-sarif@54f647b7e1bb85c95cddabcd46b0c578ec92bc1a  # v4.36.3
+        with:
+          sarif_file: results.sarif
+
   all-validate-chacks-pass:
     name: CI gate (all checks passed)
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [repo-baseline, detect-changes, validate-modules, fallback-validate-all]
+    needs: [repo-baseline, detect-changes, validate-modules, fallback-validate-all, upload-sarif]
     if: always()
+    permissions: {}
     steps:
       - name: Check all jobs
         run: |
           results='${{ toJson(needs) }}'
-          for job in repo-baseline detect-changes validate-modules fallback-validate-all; do
+          for job in repo-baseline detect-changes validate-modules fallback-validate-all upload-sarif; do
             result=$(echo "$results" | jq -r --arg j "$job" '.[$j].result // "missing"')
             if [[ "$result" != "success" && "$result" != "skipped" ]]; then
               echo "::error::Job '$job' did not pass (result: $result)"
