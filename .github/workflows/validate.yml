@@ -274,9 +274,60 @@ jobs:
             echo "${GOPATH_BIN}" >> "${GITHUB_PATH}"
           fi
 
+      - name: Align Python interpreter and yamllint module
+        run: |
+          set -euo pipefail
+
+          unset PYTHONHOME || true
+          unset PYTHONPATH || true
+          export PYTHONUNBUFFERED=1
+          export PYTHONDONTWRITEBYTECODE=1
+
+          echo "::group::Active Python resolution"
+          echo "PATH=${PATH}"
+          command -v python3
+          command -v python || true
+          python3 - <<'PY'
+          import sys
+          print("executable=", sys.executable)
+          print("version=", sys.version.replace("\n", " "))
+          print("prefix=", sys.prefix)
+          print("base_prefix=", getattr(sys, "base_prefix", sys.prefix))
+          PY
+          echo "::endgroup::"
+
+          PY_BIN="$(command -v python3)"
+
+          USER_BASE="$("${PY_BIN}" -m site --user-base)"
+          USER_BIN="${USER_BASE}/bin"
+          echo "${USER_BIN}" >> "${GITHUB_PATH}"
+          export PATH="${USER_BIN}:${PATH}"
+
+          "${PY_BIN}" -m pip install \
+            --user \
+            --disable-pip-version-check \
+            --no-cache-dir \
+            "yamllint>=1.35,<2"
+
+          "${PY_BIN}" -c "import yamllint; print(f'yamllint-module OK version={yamllint.__version__}')"
+          "${PY_BIN}" -m yamllint --version
+
+          if ! command -v yamllint >/dev/null 2>&1; then
+            echo "::error::yamllint console_script not on PATH after align step"
+            exit 1
+          fi
+          yamllint --version
+
+          if command -v mise >/dev/null 2>&1; then
+            # Refresh shims if yamllint is also managed/exposed via mise.
+            mise reshim 2>/dev/null || true
+          fi
+
       - name: Sanity-check required CLIs on PATH
         run: |
           set -euo pipefail
+          unset PYTHONHOME || true
+          unset PYTHONPATH || true
           echo "::group::Sanity-checking required CLIs"
           for bin in terraform tflint trivy golangci-lint gitleaks go python3 git node npm yamllint markdownlint-cli2 task; do
             if ! command -v "${bin}" >/dev/null 2>&1; then
@@ -285,6 +336,19 @@ jobs:
             fi
             echo "OK: ${bin} -> $(command -v "${bin}")"
           done
+
+          if ! python3 -c "import yamllint" 2>/dev/null; then
+            echo "::error file=.github/workflows/validate.yml::Active python3 cannot import yamllint (python -m yamllint would fail)"
+            python3 - <<'PY'
+            import sys
+            print("executable=", sys.executable)
+            print("path=")
+            for p in sys.path:
+                print(" ", p)
+            PY
+            exit 1
+          fi
+          echo "OK: python3 -m yamllint -> $(python3 -m yamllint --version 2>&1 | tr '\n' ' ')"
           echo "::endgroup::"
           # surface versions for debugging
           terraform version || true
@@ -309,6 +373,10 @@ jobs:
         timeout-minutes: 45
         run: |
           set -euo pipefail
+          unset PYTHONHOME || true
+          unset PYTHONPATH || true
+          export PYTHONUNBUFFERED=1
+          export PYTHONDONTWRITEBYTECODE=1
           echo "::group::task ci:non-security"
           task --verbose ci:non-security
           echo "::endgroup::"
