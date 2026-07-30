@@ -1,0 +1,232 @@
+# ==================================================
+# OS / Filesystem noise
+# ==================================================
+.DS_Store
+Thumbs.db
+Desktop.ini
+ehthumbs.db
+Icon?
+._*
+*.lnk
+
+# ==================================================
+# Editors / IDEs
+# ==================================================
+.idea/
+.vscode/
+!.vscode/settings.json
+!.vscode/extensions.json
+*.iml
+*.swp
+*.swo
+*~
+*.tmp
+*.sublime-*
+*.code-workspace
+.project
+.classpath
+.settings/
+
+# ==================================================
+# Environment / Secrets
+# ==================================================
+.env
+.env.*
+!.env.example
+secrets.auto.tfvars
+*.env
+.env.local
+.env.development
+.env.production
+.env.test
+.local-*
+*-local.*
+*-local
+.local/
+.python-version
+
+# ==================================================
+# Terraform Core Artifacts
+# ==================================================
+**/.terraform/*
+**/.terraform.d/*
+terraform.tfstate.d/
+**/terraform.tfstate.d/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+.terraform.lock.hcl
+.terraform.d/plugin-cache/
+
+# ==================================================
+# Terraform Configuration Files
+# ==================================================
+*.tfvars
+*.tfvars.json
+!*.example.tfvars
+!*.tfvars.example
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# ==================================================
+# CLI / Local Config
+# ==================================================
+.terraformrc
+terraform.rc
+*.rc.local
+
+# ==================================================
+# Terraform Plans & Outputs
+# ==================================================
+*.tfplan
+*.plan
+plan.out
+plan.json
+*.auto.tfvars.json
+*.tfplan.json
+
+# ==================================================
+# Logs
+# ==================================================
+*.log
+logs/
+*.pid
+*.pid.lock
+
+# ==================================================
+# Test / Coverage Artifacts
+# ==================================================
+coverage.out
+coverage.txt
+cover.out
+*.coverprofile
+.profile.cov
+test.out
+**/test-results/
+**/test-reports/
+**/coverage/
+.pytest_cache/
+.mypy_cache/
+
+# ==================================================
+# Go / Terratest Build Artifacts
+# ==================================================
+*.test
+*.prof
+bin/
+dist/
+vendor/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.out
+*.build
+*.wasm
+__pycache__/
+*.py[cod]
+*.coverage
+.coverage
+htmlcov/
+.ruff_cache/
+*$py.class
+
+# ==================================================
+# Security Scanner / Tooling Outputs
+# ==================================================
+checkov.report*
+trivy-report*
+sarif-report*
+*.sarif
+reports/
+**/reports/
+tmp/
+**/tmp/
+*.report
+*.jsonl
+**/junit-*.xml
+
+# ==================================================
+# Pre-commit / Cache Directories
+# ==================================================
+.pre-commit-cache/
+.terraform-docs/
+.task/
+.cache/
+**/.tflint.d/
+**/_build/
+**/.terraform-docs-cache/
+.justfile-cache/
+
+# ==================================================
+# Docker & Development
+# ==================================================
+.docker/
+docker-compose.override.yml
+docker-compose.*.yml
+!docker-compose.dev.yml
+.devcontainer/.cache/
+.devcontainer/.vscode-server/
+.devcontainer/*.log
+.devcontainer/docker-compose.*.yml
+
+# ==================================================
+# Package Managers & Dependencies
+# ==================================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnp/
+.pnp.js
+*.egg-info/
+.installed.cfg
+*.egg
+
+# ==================================================
+# Build & Distribution
+# ==================================================
+build/
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.so
+.Python
+
+# ==================================================
+# Session & Temporary Files
+# ==================================================
+*.session
+*.session.lock
+*.temp
+*.temp.*
+*.bak
+*.orig
+*.rej
+*.retry
+*.backup
+.history/
+.temp/
+tmp/
+*.tmp.yaml
+*.tmp.yml
+
+# ==================================================
+# Documentation Generation
+# ==================================================
+_site/
+.jekyll-cache/
+docs/.cache/
+docs/tmp/
+docs/generated/
