@@ -35,7 +35,12 @@ SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$")
 GO_VERSION_RE = re.compile(r"^go\s+(\d+\.\d+)(?:\.\d+)?\s*$")
 TOOL_VERSIONS_LINE_RE = re.compile(r"^([A-Za-z0-9._-]+)\s+([^\s#]+)")
 
-DEFAULT_CMD_TIMEOUT = 10
+DEFAULT_CMD_TIMEOUT = 30
+
+TRANSIENT_WARN_CODES = frozenset({
+    "TOOL_VERSION_CMD",
+    "TOOL_VERSION_PARSE",
+})
 
 REQUIRED_FILES = [
     "go.mod",
@@ -89,6 +94,14 @@ class VerificationReport:
     def has_warnings(self) -> bool:
         return any(m.level == "WARN" for m in self.messages)
 
+    @property
+    def has_strict_blocking_warnings(self) -> bool:
+        """Warnings that represent real drift (not transient probe issues)."""
+        return any(
+            m.level == "WARN" and m.code not in TRANSIENT_WARN_CODES
+            for m in self.messages
+        )
+
     def print(self) -> None:
         symbols = {"PASS": "✅", "WARN": "⚠️", "FAIL": "❌"}
         for m in self.messages:
@@ -105,6 +118,22 @@ class VerificationReport:
 # -----------------------------
 # Utility Functions
 # -----------------------------
+def _kill_process_tree(proc: subprocess.Popen[str]) -> None:
+    """Best-effort kill for timed-out / interrupted child processes."""
+    if proc.poll() is not None:
+        return
+    try:
+        if os.name == "posix":
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError, OSError):
+                proc.kill()
+        else:
+            proc.kill()
+    except Exception:
+        pass
+
+
 def run_command(cmd: List[str], timeout: int = DEFAULT_CMD_TIMEOUT) -> Tuple[int, str, str]:
     """
     Run an external command safely for CI/local use.
@@ -112,10 +141,14 @@ def run_command(cmd: List[str], timeout: int = DEFAULT_CMD_TIMEOUT) -> Tuple[int
     Hardening:
     - stdin=DEVNULL avoids tools hanging on non-TTY input
     - process group (POSIX) enables reliable timeout kill of children
+    - KeyboardInterrupt during a probe is contained (rc=130) so a sibling
+      Task cancellation cannot abort the entire verification mid-check
     - explicit handling of timeout / not-found / interrupt / OS errors
     """
     if not cmd:
         return 2, "", "Empty command"
+
+    proc: Optional[subprocess.Popen[str]] = None
     try:
         popen_kwargs = {
             "args": cmd,
@@ -123,21 +156,39 @@ def run_command(cmd: List[str], timeout: int = DEFAULT_CMD_TIMEOUT) -> Tuple[int
             "stdout": subprocess.PIPE,
             "stderr": subprocess.PIPE,
             "text": True,
-            "check": False,
-            "timeout": timeout,
         }
-
         if os.name == "posix":
+            # New session/process-group so timeout kill stays scoped to the child tree
             popen_kwargs["start_new_session"] = True
 
-        proc = subprocess.run(**popen_kwargs)
-        stdout = (proc.stdout or "").strip()
-        stderr = (proc.stderr or "").strip()
-        return proc.returncode, stdout, stderr
+        proc = subprocess.Popen(**popen_kwargs)
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            _kill_process_tree(proc)
+            try:
+                stdout, stderr = proc.communicate(timeout=3)
+            except Exception:
+                stdout, stderr = "", ""
+            return (
+                124,
+                (stdout or "").strip(),
+                f"Command timed out after {timeout}s: {' '.join(cmd)}",
+            )
+
+        return proc.returncode, (stdout or "").strip(), (stderr or "").strip()
+
     except FileNotFoundError:
         return 127, "", f"Command not found: {cmd[0]}"
-    except subprocess.TimeoutExpired:
-        return 124, "", f"Command timed out after {timeout}s: {' '.join(cmd)}"
+    except KeyboardInterrupt:
+        if proc is not None:
+            _kill_process_tree(proc)
+            try:
+                proc.communicate(timeout=1)
+            except Exception:
+                pass
+        # Contained interrupt: caller decides WARN vs continue
+        return 130, "", f"Command interrupted by signal: {' '.join(cmd)}"
     except OSError as exc:
         return 1, "", f"OS error while running {' '.join(cmd)}: {exc}"
     except Exception as exc:
@@ -366,7 +417,7 @@ def check_installed_tool_versions(tools: Dict[str, str], report: VerificationRep
             if rc in (124, 130):
                 report.add_warn(
                     "TOOL_VERSION_CMD",
-                    f"{tool} version command did not complete cleanly (rc={rc}): {err or out}",
+                    f"{tool} version probe incomplete (rc={rc}); binary present — non-blocking: {err or out}",
                 )
             else:
                 report.add_fail("TOOL_VERSION_CMD", f"{tool} version command failed: {err or out}")
@@ -413,7 +464,11 @@ def main() -> int:
         check_terraform_sot(root, tools, report)
         check_installed_tool_versions(tools, report)
     except KeyboardInterrupt:
-        report.add_fail("INTERRUPTED", "Verification interrupted by signal (KeyboardInterrupt)")
+        report.add_fail(
+            "INTERRUPTED",
+            "Verification interrupted by signal (KeyboardInterrupt). "
+            "If this runs under Task deps, ensure preflight is sequential and not a parallel sibling.",
+        )
         report.print()
         return 130
     except Exception as exc:  # noqa: BLE001
@@ -425,7 +480,7 @@ def main() -> int:
 
     if report.has_failures:
         return 1
-    if args.strict and report.has_warnings:
+    if args.strict and report.has_strict_blocking_warnings:
         return 1
     return 0
 

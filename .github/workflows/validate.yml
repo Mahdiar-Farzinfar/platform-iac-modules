@@ -306,10 +306,11 @@ jobs:
           exit 1
 
       - name: Run repo CI gate (non-security)
+        timeout-minutes: 45
         run: |
           set -euo pipefail
           echo "::group::task ci:non-security"
-          task ci:non-security
+          task --verbose ci:non-security
           echo "::endgroup::"
 
       - name: Check SARIF presence

@@ -70,7 +70,7 @@ tasks:
       - grep -E "^(terraform|tflint|tfsec|golangci-lint)[[:space:]]+" "{{.TOOL_VERSIONS_FILE}}"
       - |
         if [ -f "{{.VERIFY_ENV_SCRIPT}}" ]; then
-          python3 "{{.VERIFY_ENV_SCRIPT}}" --root "{{.ROOT_DIR}}" --strict
+          python3 -u "{{.VERIFY_ENV_SCRIPT}}" --root "{{.ROOT_DIR}}" --strict
         else
           echo "Skipping: {{.VERIFY_ENV_SCRIPT}} not found"
         fi
@@ -633,8 +633,14 @@ tasks:
     desc: >
       CI gates without security scanners (checkov/trivy/gitleaks).
       Intended for Validate / non-security workflows; security stays in a dedicated pipeline.
+    cmds:
+      - task: preflight
+      - task: ci:non-security:gates
+
+  ci:non-security:gates:
+    internal: true
+    desc: Parallel non-security CI gates (after preflight)
     deps:
-      - preflight
       - ci:changed
       - lint
       - test
