@@ -339,13 +339,7 @@ jobs:
 
           if ! python3 -c "import yamllint" 2>/dev/null; then
             echo "::error file=.github/workflows/validate.yml::Active python3 cannot import yamllint (python -m yamllint would fail)"
-            python3 - <<'PY'
-            import sys
-            print("executable=", sys.executable)
-            print("path=")
-            for p in sys.path:
-                print(" ", p)
-            PY
+            python3 -c 'import sys; print("executable=", sys.executable); print("path="); [print(" ", p) for p in sys.path]'
             exit 1
           fi
           echo "OK: python3 -m yamllint -> $(python3 -m yamllint --version 2>&1 | tr '\n' ' ')"
