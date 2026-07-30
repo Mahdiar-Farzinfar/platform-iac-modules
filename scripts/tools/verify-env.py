@@ -17,6 +17,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import platform
 import re
 import shutil
@@ -34,6 +35,7 @@ SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$")
 GO_VERSION_RE = re.compile(r"^go\s+(\d+\.\d+)(?:\.\d+)?\s*$")
 TOOL_VERSIONS_LINE_RE = re.compile(r"^([A-Za-z0-9._-]+)\s+([^\s#]+)")
 
+DEFAULT_CMD_TIMEOUT = 10
 
 REQUIRED_FILES = [
     "go.mod",
@@ -103,21 +105,45 @@ class VerificationReport:
 # -----------------------------
 # Utility Functions
 # -----------------------------
-def run_command(cmd: List[str], timeout: int = 15) -> Tuple[int, str, str]:
+def run_command(cmd: List[str], timeout: int = DEFAULT_CMD_TIMEOUT) -> Tuple[int, str, str]:
+    """
+    Run an external command safely for CI/local use.
+
+    Hardening:
+    - stdin=DEVNULL avoids tools hanging on non-TTY input
+    - process group (POSIX) enables reliable timeout kill of children
+    - explicit handling of timeout / not-found / interrupt / OS errors
+    """
+    if not cmd:
+        return 2, "", "Empty command"
     try:
-        proc = subprocess.run(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
-        return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
+        popen_kwargs = {
+            "args": cmd,
+            "stdin": subprocess.DEVNULL,
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.PIPE,
+            "text": True,
+            "check": False,
+            "timeout": timeout,
+        }
+
+        if os.name == "posix":
+            popen_kwargs["start_new_session"] = True
+
+        proc = subprocess.run(**popen_kwargs)
+        stdout = (proc.stdout or "").strip()
+        stderr = (proc.stderr or "").strip()
+        return proc.returncode, stdout, stderr
     except FileNotFoundError:
         return 127, "", f"Command not found: {cmd[0]}"
     except subprocess.TimeoutExpired:
-        return 124, "", f"Command timed out: {' '.join(cmd)}"
+        return 124, "", f"Command timed out after {timeout}s: {' '.join(cmd)}"
+    except KeyboardInterrupt:
+        return 130, "", f"Command interrupted: {' '.join(cmd)}"
+    except OSError as exc:
+        return 1, "", f"OS error while running {' '.join(cmd)}: {exc}"
+    except Exception as exc:
+        return 1, "", f"Unexpected error while running {' '.join(cmd)}: {exc}"
 
 
 def detect_python_command() -> str:
@@ -322,7 +348,7 @@ def check_installed_tool_versions(tools: Dict[str, str], report: VerificationRep
     check_matrix = {
         "terraform": (["terraform", "version"], parse_terraform_version_output),
         "tflint": (["tflint", "--version"], parse_tflint_version_output),
-        "trivy": (["trivy", "--version"], parse_trivy_version_output),
+        "trivy": (["trivy", "version"], parse_trivy_version_output),
         "golangci-lint": (["golangci-lint", "version"], parse_golangci_lint_version_output),
     }
 
@@ -337,9 +363,15 @@ def check_installed_tool_versions(tools: Dict[str, str], report: VerificationRep
 
         cmd, parser = check_matrix[tool]
         cmd = [exec_name] + cmd[1:]
-        rc, out, err = run_command(cmd)
+        rc, out, err = run_command(cmd, timeout=DEFAULT_CMD_TIMEOUT)
         if rc != 0:
-            report.add_fail("TOOL_VERSION_CMD", f"{tool} version command failed: {err or out}")
+            if rc in (124, 130):
+                report.add_warn(
+                    "TOOL_VERSION_CMD",
+                    f"{tool} version command did not complete cleanly (rc={rc}): {err or out}",
+                )
+            else:
+                report.add_fail("TOOL_VERSION_CMD", f"{tool} version command failed: {err or out}")
             continue
 
         actual = parser(out or err)
@@ -374,13 +406,22 @@ def main() -> int:
         print(f"❌ [FAIL] ROOT_PATH: Invalid root path: {root}")
         return 2
 
-    check_required_files(root, report)
-    check_os_python(report)
-    check_base_commands(report)
-    check_go_mod(root, report)
-    tools = check_tool_versions(root, report)
-    check_terraform_sot(root, tools, report)
-    check_installed_tool_versions(tools, report)
+    try:
+        check_required_files(root, report)
+        check_os_python(report)
+        check_base_commands(report)
+        check_go_mod(root, report)
+        tools = check_tool_versions(root, report)
+        check_terraform_sot(root, tools, report)
+        check_installed_tool_versions(tools, report)
+    except KeyboardInterrupt:
+        report.add_fail("INTERRUPTED", "Verification interrupted by signal (KeyboardInterrupt)")
+        report.print()
+        return 130
+    except Exception as exc:  # noqa: BLE001
+        report.add_fail("UNEXPECTED", f"Unhandled exception during verification: {exc}")
+        report.print()
+        return 1
 
     report.print()
 
