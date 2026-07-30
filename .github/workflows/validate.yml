@@ -305,11 +305,11 @@ jobs:
           echo "::error::pre-commit failed (see above logs for hook output)"
           exit 1
 
-      - name: Run repo CI gate (non-module)
+      - name: Run repo CI gate (non-security)
         run: |
           set -euo pipefail
-          echo "::group::Executing task ci (repo-level non-module checks)"
-          task ci || { echo "::error::task ci failed with exit code $?"; exit 1; }
+          echo "::group::task ci:non-security"
+          task ci:non-security
           echo "::endgroup::"
 
       - name: Check SARIF presence

@@ -629,6 +629,18 @@ tasks:
       - validate:terraform
       - docs
 
+  ci:non-security:
+    desc: >
+      CI gates without security scanners (checkov/trivy/gitleaks).
+      Intended for Validate / non-security workflows; security stays in a dedicated pipeline.
+    deps:
+      - preflight
+      - ci:changed
+      - lint
+      - test
+      - test:cross-platform
+      - docs:check
+
   ci:
     desc: CI-equivalent checks (no auto-fix)
     deps:
