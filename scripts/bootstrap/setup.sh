@@ -9,6 +9,14 @@
 #
 # All bootstrap logic lives in: scripts/bootstrap/setup.py
 
+if [ -z "${BASH_VERSION:-}" ]; then
+  if command -v bash >/dev/null 2>&1; then
+    exec bash "$0" "$@"
+  fi
+  printf '[bootstrap:setup.sh][ERROR] bash is required but was not found in PATH.\n' >&2
+  exit 2
+fi
+
 set -Eeuo pipefail
 IFS=$'\n\t'
 

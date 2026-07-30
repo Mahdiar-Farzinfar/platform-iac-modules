@@ -1,0 +1,428 @@
+---
+name: Security Scan
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch: {}
+
+concurrency:
+  group: security-scan-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+  TRIVY_CACHE_DIR: .trivy-cache
+  CHECKOV_OUTPUT_DIR: .security-results/checkov
+  TRIVY_OUTPUT_DIR: .security-results/trivy
+  OSV_OUTPUT_DIR: .security-results/osv
+  PATH_EXTRA: ${{ github.workspace }}/.bin:${{ github.workspace }}/bin:${{ github.workspace }}/tooling/bin:$HOME/.local/bin:$HOME/go/bin:$HOME/.asdf/shims
+
+jobs:
+  detect-targets:
+    name: Detect Scan Targets
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      has_modules: ${{ steps.detect.outputs.has_modules }}
+      has_tooling: ${{ steps.detect.outputs.has_tooling }}
+      has_root_tf: ${{ steps.detect.outputs.has_root_tf }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Detect Terraform content
+        id: detect
+        run: |
+          set -euo pipefail
+          has_modules=false
+          has_tooling=false
+          has_root_tf=false
+
+          if [ -d "modules" ] && find modules -type f \( -name '*.tf' -o -name '*.tfvars' \) | grep -q .; then has_modules=true; fi
+          if [ -d "tooling" ] && find tooling -type f \( -name '*.tf' -o -name '*.tfvars' \) | grep -q .; then has_tooling=true; fi
+          if find . -maxdepth 1 -type f \( -name '*.tf' -o -name '*.tfvars' \) | grep -q .; then has_root_tf=true; fi
+
+          {
+            echo "has_modules=${has_modules}"
+            echo "has_tooling=${has_tooling}"
+            echo "has_root_tf=${has_root_tf}"
+          } >> "${GITHUB_OUTPUT}"
+
+  checkov:
+    name: Checkov IaC Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: detect-targets
+    if: needs.detect-targets.outputs.has_modules == 'true' || needs.detect-targets.outputs.has_tooling == 'true' || needs.detect-targets.outputs.has_root_tf == 'true'
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Setup Task
+        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
+
+      - name: Setup Go (bootstrap installer)
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Bootstrap toolchain (Task SoT)
+        run: |
+          set -euo pipefail
+          export PATH="${PATH_EXTRA}:${PATH}"
+          if task --list 2>/dev/null | grep -qE '^[[:space:]]*bootstrap([[:space:]]|$)'; then
+            task bootstrap:posix -- --apply --non-interactive
+          else
+            task bootstrap:posix -- --apply --non-interactive
+          fi
+          echo "${PATH_EXTRA}" | tr ':' '\n' | while read -r d; do
+            [ -n "${d}" ] && echo "${d}" >> "${GITHUB_PATH}"
+          done
+          if [ -d "${HOME}/.asdf/shims" ]; then
+            echo "${HOME}/.asdf/shims" >> "${GITHUB_PATH}"
+          fi
+
+      - name: Preflight (Taskfile SoT)
+        run: task preflight
+
+      - name: Prepare output directories
+        run: |
+          set -euo pipefail
+          mkdir -p "${CHECKOV_OUTPUT_DIR}"
+
+      - name: Run Checkov SARIF
+        run: |
+          pip install checkov
+          checkov -d . --framework terraform --quiet --soft-fail \
+            --output sarif \
+            --output-file-path "${CHECKOV_OUTPUT_DIR}" \
+            --config-file tooling/.checkov.yml
+
+      - name: Run Checkov CLI report (enforcing)
+        run: |
+          checkov -d . --framework terraform --quiet \
+            --output cli \
+            --config-file tooling/.checkov.yml
+
+      - name: Upload Checkov SARIF
+        if: always() && hashFiles('.security-results/checkov/results_sarif.sarif') != ''
+        uses: github/codeql-action/upload-sarif@54f647b7e1bb85c95cddabcd46b0c578ec92bc1a  # v4.36.3
+        with:
+          sarif_file: .security-results/checkov/results_sarif.sarif
+          category: checkov
+
+  trivy-iac:
+    name: Trivy IaC and FS Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: detect-targets
+    if: needs.detect-targets.outputs.has_modules == 'true' || needs.detect-targets.outputs.has_tooling == 'true' || needs.detect-targets.outputs.has_root_tf == 'true'
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Setup Task
+        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
+
+      - name: Setup Go (bootstrap installer)
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Bootstrap toolchain (Task SoT)
+        run: |
+          set -euo pipefail
+          export PATH="${PATH_EXTRA}:${PATH}"
+          if task --list 2>/dev/null | grep -qE '^[[:space:]]*bootstrap([[:space:]]|$)'; then
+            task bootstrap:posix -- --apply --non-interactive
+          else
+            task bootstrap:posix -- --apply --non-interactive
+          fi
+          echo "${PATH_EXTRA}" | tr ':' '\n' | while read -r d; do
+            [ -n "${d}" ] && echo "${d}" >> "${GITHUB_PATH}"
+          done
+          if [ -d "${HOME}/.asdf/shims" ]; then
+            echo "${HOME}/.asdf/shims" >> "${GITHUB_PATH}"
+          fi
+
+      - name: Preflight (Taskfile SoT)
+        run: task preflight
+
+      - name: Prepare output directories
+        run: |
+          set -euo pipefail
+          mkdir -p "${TRIVY_OUTPUT_DIR}"
+
+      - name: Restore Trivy cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ${{ env.TRIVY_CACHE_DIR }}
+          key: trivy-db-${{ runner.os }}-v1
+          restore-keys: |
+            trivy-db-${{ runner.os }}-
+
+      - name: Run Trivy config scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          format: sarif
+          output: .security-results/trivy/trivy-config.sarif
+          cache-dir: .trivy-cache
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: 1
+
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: .security-results/trivy/trivy-fs.sarif
+          cache-dir: .trivy-cache
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: 1
+          scanners: vuln,secret,misconfig
+
+      - name: Upload Trivy config SARIF
+        if: always() && hashFiles('.security-results/trivy/trivy-config.sarif') != ''
+        uses: github/codeql-action/upload-sarif@8533807ff379ac610d2b2c389c47e7c629d31d13  # v4.36.3
+        with:
+          sarif_file: .security-results/trivy/trivy-config.sarif
+          category: trivy-config
+
+      - name: Upload Trivy filesystem SARIF
+        if: always() && hashFiles('.security-results/trivy/trivy-fs.sarif') != ''
+        uses: github/codeql-action/upload-sarif@54f647b7e1bb85c95cddabcd46b0c578ec92bc1a  # v4.36.3
+        with:
+          sarif_file: .security-results/trivy/trivy-fs.sarif
+          category: trivy-fs
+
+  gitleaks:
+    name: Secret Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Setup Task
+        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
+
+      - name: Setup Go (bootstrap installer)
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install Gitleaks (version from tooling/.tool-versions)
+        run: |
+          set -euo pipefail
+
+          GITLEAKS_VERSION="$(grep -E '^gitleaks[[:space:]]' tooling/.tool-versions | awk '{print $2}')"
+          if [ -z "${GITLEAKS_VERSION}" ]; then
+            echo "::error::gitleaks version not found in tooling/.tool-versions"
+            exit 1
+          fi
+
+          case "$(uname -m)" in
+            x86_64)          ARCH="x64"   ;;
+            aarch64|arm64)   ARCH="arm64" ;;
+            *)
+              echo "::error::Unsupported architecture: $(uname -m)"
+              exit 1
+              ;;
+          esac
+
+          mkdir -p "${HOME}/.local/bin"
+          curl -sSfL \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${ARCH}.tar.gz" \
+            -o /tmp/gitleaks.tar.gz
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          install -m 0755 /tmp/gitleaks "${HOME}/.local/bin/gitleaks"
+          rm -f /tmp/gitleaks.tar.gz /tmp/gitleaks
+          echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
+          "${HOME}/.local/bin/gitleaks" version
+
+      - name: Bootstrap toolchain (Task SoT)
+        run: |
+          set -euo pipefail
+          export PATH="${PATH_EXTRA}:${PATH}"
+          if task --list 2>/dev/null | grep -qE '^[[:space:]]*bootstrap([[:space:]]|$)'; then
+            task bootstrap:posix -- --apply --non-interactive
+          else
+            task bootstrap:posix -- --apply --non-interactive
+          fi
+          echo "${PATH_EXTRA}" | tr ':' '\n' | while read -r d; do
+            [ -n "${d}" ] && echo "${d}" >> "${GITHUB_PATH}"
+          done
+          if [ -d "${HOME}/.asdf/shims" ]; then
+            echo "${HOME}/.asdf/shims" >> "${GITHUB_PATH}"
+          fi
+
+      - name: Run Gitleaks from Taskfile (SoT)
+        run: task security:gitleaks TASK_X_SKIP_DEPS=1
+
+  osv-scanner:
+    name: Dependency Vulnerability Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Setup Go (for OSV-Scanner install)
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: 1.26.4
+          cache: true
+
+      - name: Prepare output directories
+        run: |
+          set -euo pipefail
+          mkdir -p "${OSV_OUTPUT_DIR}"
+
+      - name: Install OSV-Scanner
+        run: |
+          set -euo pipefail
+          GOPATH="$(go env GOPATH)"
+          export PATH="${GOPATH}/bin:${PATH}"
+          go install github.com/google/osv-scanner/v2/cmd/osv-scanner@latest
+          echo "$(go env GOPATH)/bin" >> "${GITHUB_PATH}"
+          osv-scanner --version
+
+      - name: Run OSV-Scanner
+        run: |
+          set -euo pipefail
+          mkdir -p "${OSV_OUTPUT_DIR}"
+          GOPATH="$(go env GOPATH)"
+          export PATH="${GOPATH}/bin:${PATH}"
+          osv-scanner --recursive --format=json \
+            --output="${OSV_OUTPUT_DIR}/osv-results.json" \
+            . || true
+
+  upload-reports:
+    name: Upload Security Reports
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: always()
+    needs: [checkov, trivy-iac, osv-scanner]
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Upload security artifacts
+        if: always() && hashFiles('.security-results/**') != ''
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808  # v4.6.0
+        with:
+          name: security-reports-${{ github.run_id }}
+          path: .security-results/**
+          if-no-files-found: ignore
+          retention-days: 14
+
+  all-security-checks-passed:
+    name: All Security Checks Passed
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: always()
+    needs: [detect-targets, checkov, trivy-iac, gitleaks, osv-scanner, upload-reports, summary]
+    permissions: {}
+    steps:
+      - name: Check all jobs passed
+        run: |
+          results=(
+            "${{ needs.detect-targets.result }}"
+            "${{ needs.checkov.result }}"
+            "${{ needs.trivy-iac.result }}"
+            "${{ needs.gitleaks.result }}"
+            "${{ needs.osv-scanner.result }}"
+            "${{ needs.upload-reports.result }}"
+            "${{ needs.summary.result }}"
+          )
+          for result in "${results[@]}"; do
+            [[ "${result}" == "success" || "${result}" == "skipped" ]] || { echo "Job failed: ${result}"; exit 1; }
+          done
+
+  summary:
+    name: Security Summary
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: always()
+    needs: [checkov, trivy-iac, gitleaks, osv-scanner, upload-reports]
+    permissions: {}
+    steps:
+      - name: Write workflow summary
+        run: |
+          {
+            echo "## Security Scan Summary"
+            echo ""
+            echo "| Job | Result |"
+            echo "|---|---|"
+            echo "| Checkov | ${{ needs.checkov.result }} |"
+            echo "| Trivy IaC and FS | ${{ needs.trivy-iac.result }} |"
+            echo "| Gitleaks | ${{ needs.gitleaks.result }} |"
+            echo "| OSV-Scanner | ${{ needs.osv-scanner.result }} |"
+            echo "| Upload Reports | ${{ needs.upload-reports.result }} |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Fail if any required security job failed
+        run: |
+          set -euo pipefail
+          results=(
+            "${{ needs.checkov.result }}"
+            "${{ needs.trivy-iac.result }}"
+            "${{ needs.gitleaks.result }}"
+            "${{ needs.osv-scanner.result }}"
+            "${{ needs.upload-reports.result }}"
+          )
+          for result in "${results[@]}"; do
+            [[ "${result}" == "success" || "${result}" == "skipped" ]] || { echo "At least one security scan job failed: ${result}"; exit 1; }
+          done

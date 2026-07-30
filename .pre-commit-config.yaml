@@ -1,0 +1,276 @@
+---
+default_stages:
+  - pre-commit
+  - pre-push
+  - commit-msg
+
+default_language_version:
+  python: python3
+
+minimum_pre_commit_version: "3.7.1"
+
+fail_fast: false
+
+exclude: |
+  (?x)^(
+    \.git/|
+    \.terraform/|
+    \.terragrunt-cache/|
+    vendor/|
+    bin/|
+    dist/|
+    build/|
+    coverage/|
+    .*\.tfstate(\..*)?$|
+    .*\.tfplan$|
+    .*\.terraform\.lock\.hcl$|
+    .*\.log$
+  )$
+
+files: |
+  (?x)^(
+    .*\.ya?ml|
+    .*\.json|
+    .*\.toml|
+    .*\.xml|
+    .*\.md|
+    .*\.(sh|bash|go|tf|hcl)
+  )$
+
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: check-symlinks
+      - id: destroyed-symlinks
+      - id: trailing-whitespace
+        args:
+          - --markdown-linebreak-ext=md
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args:
+          - --fix=lf
+      - id: check-yaml
+        files: \.ya?ml$
+      - id: check-json
+        files: \.json$
+      - id: check-toml
+        files: \.toml$
+      - id: check-xml
+        files: \.xml$
+      - id: check-added-large-files
+        always_run: true
+        pass_filenames: false
+        args:
+          - --maxkb=1024
+      - id: detect-private-key
+      - id: check-executables-have-shebangs
+      - id: check-shebang-scripts-are-executable
+
+  - repo: https://github.com/adrienverge/yamllint.git
+    rev: v1.38.0
+    hooks:
+      - id: yamllint
+        args: ['-c', 'tooling/.yamllint.yml']
+        types: [file, yaml]
+        language: python
+
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.7
+    hooks:
+      - id: actionlint
+        files: ^\.github/workflows/.*\.ya?ml$
+
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.41.0
+    hooks:
+      - id: markdownlint
+        files: \.md$
+
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.96.3
+    hooks:
+      - id: terraform_fmt
+        files: ^modules/.*\.(tf|hcl)$
+
+      - id: terraform_docs
+        files: ^modules/[^/]+/(README\.md|main\.tf|variables\.tf|outputs\.tf|versions\.tf|locals\.tf)$
+        args:
+          - --args=--config=.terraform-docs.yml
+          - --args=--output-file=README.md
+          - --args=--output-mode=inject
+
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.10.0.1
+    hooks:
+      - id: shellcheck
+        files: (^|.*/)(scripts|tests)/.*\.(sh|bash)$
+
+  - repo: local
+    hooks:
+      - id: tooling-sanity-check
+        name: tooling sanity check
+        entry: task preflight
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages:
+          - pre-commit
+
+      - id: check-staged-against-gitignore
+        name: prevent ignored files from being committed
+        language: python
+        entry: python
+        pass_filenames: false
+        always_run: true
+        args:
+          - -c
+          - |
+            import subprocess
+            import sys
+
+            def run_git(*args, input_text=None):
+                return subprocess.run(
+                    ["git", *args],
+                    input=input_text,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+
+            staged_result = run_git(
+                "diff",
+                "--cached",
+                "--name-only",
+                "--diff-filter=ACMR",
+            )
+            if staged_result.returncode not in (0, 1):
+                sys.stderr.write(staged_result.stderr)
+                raise SystemExit(staged_result.returncode)
+
+            staged_files = [
+                line.strip()
+                for line in staged_result.stdout.splitlines()
+                if line.strip()
+            ]
+            if not staged_files:
+                raise SystemExit(0)
+
+            ignored_result = run_git(
+                "check-ignore",
+                "--stdin",
+                input_text="\n".join(staged_files) + "\n",
+            )
+            if ignored_result.returncode not in (0, 1):
+                sys.stderr.write(ignored_result.stderr)
+                raise SystemExit(ignored_result.returncode)
+
+            ignored_files = [
+                line.strip()
+                for line in ignored_result.stdout.splitlines()
+                if line.strip()
+            ]
+            if not ignored_files:
+                raise SystemExit(0)
+
+            print("ERROR: The following staged files are ignored by .gitignore:")
+            for path in ignored_files:
+                print(f"  - {path}")
+            print()
+            print("Fix:")
+            print("  - Unstage/remove them, or")
+            print("  - update .gitignore intentionally, then re-stage")
+            raise SystemExit(1)
+        stages:
+          - pre-commit
+
+      - id: shfmt
+        name: shfmt
+        entry: task fmt:shell
+        language: system
+        pass_filenames: false
+        always_run: true
+        files: (^|.*/)(scripts|tests)/.*\.(sh|bash)$
+        stages: [pre-commit]
+
+      - id: gofmt
+        name: gofmt
+        entry: task fmt:go
+        language: system
+        pass_filenames: false
+        always_run: true
+        files: \.go$
+        stages: [pre-commit]
+
+      - id: go-test
+        name: go test
+        entry: task test:go
+        language: system
+        pass_filenames: false
+        files: \.go$
+        stages:
+          - pre-push
+
+      - id: go-vet
+        name: go vet
+        entry: task validate:go
+        language: system
+        pass_filenames: false
+        files: \.go$
+        stages:
+          - pre-push
+
+      - id: golangci-lint
+        name: golangci-lint
+        entry: task lint:go
+        language: system
+        pass_filenames: false
+        files: \.go$
+        stages:
+          - pre-push
+
+      - id: terraform-tflint
+        name: terraform tflint
+        entry: task lint:tflint
+        language: system
+        pass_filenames: false
+        files: ^modules/.*\.(tf|hcl)$
+        stages:
+          - pre-push
+
+      - id: terraform-module-tests
+        name: terraform module tests
+        entry: task test:terraform
+        language: system
+        pass_filenames: false
+        files: ^modules/.+/(main|variables|outputs|versions|locals)\.tf$
+        stages:
+          - pre-push
+
+      - id: terraform-validate
+        name: terraform validate
+        entry: task validate:terraform
+        language: system
+        pass_filenames: false
+        files: ^modules/.*\.(tf|hcl)$
+        stages:
+          - pre-push
+
+      - id: task-security-gitleaks
+        name: task security gitleaks
+        entry: task security:gitleaks
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages:
+          - pre-push
+
+  - repo: https://github.com/commitizen-tools/commitizen
+    rev: v3.29.1
+    hooks:
+      - id: commitizen
+        stages:
+          - commit-msg

@@ -1,0 +1,775 @@
+---
+name: Validate
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "modules/**"
+      - "tooling/**"
+      - "catalog/**"
+      - "scripts/**"
+      - "docs/**"
+      - "Makefile"
+      - "Taskfile.yml"
+      - "justfile"
+      - ".editorconfig"
+      - ".pre-commit-config.yaml"
+      - "tooling/.tflint.hcl"
+      - "tooling/.tool-versions"
+      - "tooling/.terraform-version"
+      - ".terraform-docs.yml"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/*.yml"
+
+  push:
+    branches: [main]
+    paths:
+      - "modules/**"
+      - "tooling/**"
+      - "catalog/**"
+      - "scripts/**"
+      - "docs/**"
+      - "Makefile"
+      - "Taskfile.yml"
+      - "justfile"
+      - ".editorconfig"
+      - ".pre-commit-config.yaml"
+      - "tooling/.tflint.hcl"
+      - "tooling/.tool-versions"
+      - "tooling/.terraform-version"
+      - ".terraform-docs.yml"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/*.yml"
+
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Validation mode"
+        required: true
+        default: "auto"
+        type: choice
+        options:
+          - auto
+          - full
+          - module
+      module_path:
+        description: "Required when mode=module (e.g. modules/vpc)"
+        required: false
+        type: string
+      bypass_change_detection:
+        description: "Force full matrix regardless of detected changes"
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: validate-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+env:
+  CI: "true"
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+  TF_CLI_ARGS_init: "-no-color -input=false -backend=false"
+  TF_CLI_ARGS_validate: "-no-color"
+  TF_PLUGIN_CACHE_DIR: "${{ github.workspace }}/.terraform.d/plugin-cache"
+  TOOL_VERSIONS_FILE: "tooling/.tool-versions"
+  TERRAFORM_VERSION_FILE: "tooling/.terraform-version"
+  TFLINT_CONFIG: "tooling/.tflint.hcl"
+  TASK_X_REMOTE_TASKFILES: "0"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PIP_NO_PYTHON_VERSION_WARNING: "1"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  repo-baseline:
+    name: Repo baseline checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      go_version: ${{ steps.tool-versions.outputs.go_version }}
+      terraform_version: ${{ steps.tool-versions.outputs.terraform_version }}
+      python_version: ${{ steps.tool-versions.outputs.python_version }}
+      tflint_version: ${{ steps.tool-versions.outputs.tflint_version }}
+      terraform_docs_version: ${{ steps.tool-versions.outputs.terraform_docs_version }}
+      task_version: ${{ steps.tool-versions.outputs.task_version }}
+      node_version: ${{ steps.tool-versions.outputs.node_version }}
+      gitleaks_version: ${{ steps.tool-versions.outputs.gitleaks_version }}
+      golangci_lint_version: ${{ steps.tool-versions.outputs.golangci_lint_version }}
+      sarif_exists: ${{ steps.sarif_check.outputs.exists }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@1044a6dea927916f2c38ba5aeffbc0a847b1221a  # v7.0.0
+        with:
+          fetch-depth: 200
+          persist-credentials: false
+
+      - name: Install Task
+        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
+        with:
+          version: 3.x
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Read canonical toolchain versions and verify mirrors
+        id: tool-versions
+        run: |
+          set -euo pipefail
+          task verify:toolchain
+
+          TF_VER=""
+          GO_VER=""
+          PY_VER=""
+          TFLINT_VER=""
+          TFDOCS_VER=""
+          TASK_VER=""
+          NODE_VER=""
+          GITLEAKS_VER=""
+          GOLANGCI_LINT_VER=""
+
+          if [[ -f "${TERRAFORM_VERSION_FILE}" ]]; then
+            TF_VER="$(tr -d '\r' < "${TERRAFORM_VERSION_FILE}" | xargs)"
+          fi
+          if [[ -f go.mod ]]; then
+            GO_VER="$(awk '/^go / {print $2; exit}' go.mod)"
+          fi
+          if [[ -f "${TOOL_VERSIONS_FILE}" ]]; then
+            PY_VER="$(awk '/^python[[:space:]]+/ {print $2; exit}' "${TOOL_VERSIONS_FILE}" || true)"
+            TFLINT_VER="$(awk '/^tflint[[:space:]]+/ {print $2; exit}' "${TOOL_VERSIONS_FILE}" || true)"
+            TFDOCS_VER="$(awk '/^terraform-docs[[:space:]]+/ {print $2; exit}' "${TOOL_VERSIONS_FILE}" || true)"
+            TASK_VER="$(awk '$1 == "task" { print $2; exit }' "${TOOL_VERSIONS_FILE}" || true)"
+            NODE_VER="$(awk '$1 == "nodejs" { print $2; exit }' "${TOOL_VERSIONS_FILE}" || true)"
+            GITLEAKS_VER="$(awk '$1 == "gitleaks" { print $2; exit }' "${TOOL_VERSIONS_FILE}" || true)"
+            GOLANGCI_LINT_VER="$(awk '$1 == "golangci-lint" { print $2; exit }' "${TOOL_VERSIONS_FILE}" || true)"
+          fi
+
+          : "${PY_VER:=3.12}"
+
+          [[ -n "${TF_VER}" ]] || { echo "::error::Terraform version is missing"; exit 1; }
+          [[ -n "${GO_VER}" ]] || { echo "::error::Go version is missing"; exit 1; }
+          [[ -n "${PY_VER}" ]] || { echo "::error::Python version is missing"; exit 1; }
+          [[ -n "${TASK_VER}" ]] || { echo "::error::Task version is missing"; exit 1; }
+          [[ -n "${NODE_VER}" ]] || { echo "::error::Node.js version is missing"; exit 1; }
+          [[ -n "${GITLEAKS_VER}" ]] || { echo "::error::Gitleaks version is missing"; exit 1; }
+          [[ -n "${GOLANGCI_LINT_VER}" ]] || { echo "::error::golangci-lint version is missing"; exit 1; }
+
+          if [[ -z "${TFLINT_VER}" || -z "${TFDOCS_VER}" ]]; then
+            echo "::warning::tflint/terraform-docs version empty; module jobs may fail if required"
+            exit 1
+          fi
+
+          {
+            echo "terraform_version=${TF_VER}"
+            echo "go_version=${GO_VER}"
+            echo "python_version=${PY_VER}"
+            echo "tflint_version=${TFLINT_VER}"
+            echo "terraform_docs_version=${TFDOCS_VER}"
+            echo "task_version=${TASK_VER}"
+            echo "node_version=${NODE_VER}"
+            echo "gitleaks_version=${GITLEAKS_VER}"
+            echo "golangci_lint_version=${GOLANGCI_LINT_VER}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Setup Task (pinned)
+        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
+        with:
+          version: ${{ steps.tool-versions.outputs.task_version }}
+
+      - name: Validate output patterns (Sanitization against Injection)
+        id: validate-outputs
+        run: |
+          task verify:outputs \
+            GO_VERSION="${{ steps.tool-versions.outputs.go_version }}" \
+            TERRAFORM_VERSION="${{ steps.tool-versions.outputs.terraform_version }}" \
+            PYTHON_VERSION="${{ steps.tool-versions.outputs.python_version }}" \
+            TFLINT_VERSION="${{ steps.tool-versions.outputs.tflint_version }}" \
+            TERRAFORM_DOCS_VERSION="${{ steps.tool-versions.outputs.terraform_docs_version }}"
+
+      - name: Setup Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+        with:
+          python-version: ${{ steps.tool-versions.outputs.python_version }}
+
+      - name: Fetch base branch (PR)
+        if: github.event_name == 'pull_request'
+        run: git fetch --no-tags --prune --depth=200 origin "${{ github.base_ref }}"
+
+      - name: Bootstrap toolchain
+        run: |
+          set -euo pipefail
+          # CI runs on Linux (ubuntu-latest / act Linux container).
+          if [[ "$(uname -s)" == "Linux" ]]; then
+            if ! command -v asdf >/dev/null 2>&1 && ! command -v mise >/dev/null 2>&1; then
+              echo "Installing mise (no asdf/mise preinstalled)"
+              curl -fsSL https://mise.run | sh
+              export PATH="${HOME}/.local/bin:${PATH}"
+              echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
+            fi
+            if task -l 2>/dev/null | grep -Eq '(^|[[:space:]])bootstrap:linux([[:space:]]|$)'; then
+              task bootstrap:linux
+            elif task -l 2>/dev/null | grep -Eq '(^|[[:space:]])bootstrap:ci([[:space:]]|$)'; then
+              task bootstrap:ci
+            elif task -l 2>/dev/null | grep -Eq '(^|[[:space:]])ci:bootstrap([[:space:]]|$)'; then
+              task ci:bootstrap
+            elif task -l 2>/dev/null | grep -Eq '(^|[[:space:]])bootstrap:posix([[:space:]]|$)'; then
+              task bootstrap:posix
+            elif task -l 2>/dev/null | grep -Eq '(^|[[:space:]])bootstrap([[:space:]]|$)'; then
+              task bootstrap
+            else
+              if [[ -f scripts/tools/install-tools-posix.go ]]; then
+                go run ./scripts/tools/install-tools-posix.go --root "${GITHUB_WORKSPACE}"
+              elif [[ -f scripts/tools/install-tools-linux.go ]]; then
+                go run ./scripts/tools/install-tools-linux.go --root "${GITHUB_WORKSPACE}"
+              elif [[ -f scripts/tools/install-tools.go ]]; then
+                go run ./scripts/tools/install-tools.go --root "${GITHUB_WORKSPACE}"
+              else
+                echo "::warning::No Linux bootstrap installer found; continuing with setup actions + PATH only"
+              fi
+            fi
+          else
+            task bootstrap
+          fi
+
+          echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
+          echo "${HOME}/bin" >> "${GITHUB_PATH}"
+          if [[ -d "${HOME}/.asdf/shims" ]]; then
+            echo "${HOME}/.asdf/shims" >> "${GITHUB_PATH}"
+            echo "${HOME}/.asdf/bin" >> "${GITHUB_PATH}"
+          fi
+          if [[ -n "${ASDF_DATA_DIR:-}" ]]; then
+            echo "${ASDF_DATA_DIR}/shims" >> "${GITHUB_PATH}"
+            echo "${ASDF_DATA_DIR}/bin" >> "${GITHUB_PATH}"
+          fi
+          if [[ -d "${HOME}/.local/share/mise/shims" ]]; then
+            echo "${HOME}/.local/share/mise/shims" >> "${GITHUB_PATH}"
+          fi
+          if command -v mise >/dev/null 2>&1; then
+            # Ensure mise-managed tools are visible to subsequent steps.
+            eval "$(mise activate bash --shims 2>/dev/null || true)"
+            if mise bin-paths >/dev/null 2>&1; then
+              while IFS= read -r p; do
+                [[ -n "${p}" ]] && echo "${p}" >> "${GITHUB_PATH}"
+              done < <(mise bin-paths 2>/dev/null || true)
+            fi
+          fi
+          if command -v go >/dev/null 2>&1; then
+            GOPATH_BIN="$(go env GOPATH)/bin"
+            echo "${GOPATH_BIN}" >> "${GITHUB_PATH}"
+          fi
+
+      - name: Align Python interpreter and yamllint module
+        run: |
+          set -euo pipefail
+
+          unset PYTHONHOME || true
+          unset PYTHONPATH || true
+          export PYTHONUNBUFFERED=1
+          export PYTHONDONTWRITEBYTECODE=1
+
+          echo "::group::Active Python resolution"
+          echo "PATH=${PATH}"
+          command -v python3
+          command -v python || true
+          python3 - <<'PY'
+          import sys
+          print("executable=", sys.executable)
+          print("version=", sys.version.replace("\n", " "))
+          print("prefix=", sys.prefix)
+          print("base_prefix=", getattr(sys, "base_prefix", sys.prefix))
+          PY
+          echo "::endgroup::"
+
+          PY_BIN="$(command -v python3)"
+
+          USER_BASE="$("${PY_BIN}" -m site --user-base)"
+          USER_BIN="${USER_BASE}/bin"
+          echo "${USER_BIN}" >> "${GITHUB_PATH}"
+          export PATH="${USER_BIN}:${PATH}"
+
+          "${PY_BIN}" -m pip install \
+            --user \
+            --disable-pip-version-check \
+            --no-cache-dir \
+            "yamllint>=1.35,<2"
+
+          "${PY_BIN}" -c "import yamllint; print(f'yamllint-module OK version={yamllint.__version__}')"
+          "${PY_BIN}" -m yamllint --version
+
+          if ! command -v yamllint >/dev/null 2>&1; then
+            echo "::error::yamllint console_script not on PATH after align step"
+            exit 1
+          fi
+          yamllint --version
+
+          if command -v mise >/dev/null 2>&1; then
+            # Refresh shims if yamllint is also managed/exposed via mise.
+            mise reshim 2>/dev/null || true
+          fi
+
+      - name: Sanity-check required CLIs on PATH
+        run: |
+          set -euo pipefail
+          unset PYTHONHOME || true
+          unset PYTHONPATH || true
+          echo "::group::Sanity-checking required CLIs"
+          for bin in terraform tflint trivy golangci-lint gitleaks go python3 git node npm yamllint markdownlint-cli2 task; do
+            if ! command -v "${bin}" >/dev/null 2>&1; then
+              echo "::error file=.github/workflows/validate.yml::Required tool '${bin}' is not on PATH after bootstrap"
+              exit 1
+            fi
+            echo "OK: ${bin} -> $(command -v "${bin}")"
+          done
+
+          if ! python3 -c "import yamllint" 2>/dev/null; then
+            echo "::error file=.github/workflows/validate.yml::Active python3 cannot import yamllint (python -m yamllint would fail)"
+            python3 -c 'import sys; print("executable=", sys.executable); print("path="); [print(" ", p) for p in sys.path]'
+            exit 1
+          fi
+          echo "OK: python3 -m yamllint -> $(python3 -m yamllint --version 2>&1 | tr '\n' ' ')"
+          echo "::endgroup::"
+          # surface versions for debugging
+          terraform version || true
+          tflint --version || true
+          gitleaks version || true
+          golangci-lint version || true
+
+      - name: Run repo-level pre-commit
+        id: pre-commit
+        uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd  # v3.0.1
+        continue-on-error: true   # allow explicit failure reporting below
+        with:
+          extra_args: --all-files --show-diff-on-failure --verbose
+
+      - name: Report pre-commit result
+        if: steps.pre-commit.outcome != 'success'
+        run: |
+          echo "::error::pre-commit failed (see above logs for hook output)"
+          exit 1
+
+      - name: Run repo CI gate (non-security)
+        timeout-minutes: 45
+        run: |
+          set -euo pipefail
+          unset PYTHONHOME || true
+          unset PYTHONPATH || true
+          export PYTHONUNBUFFERED=1
+          export PYTHONDONTWRITEBYTECODE=1
+          echo "::group::task ci:non-security"
+          task --verbose ci:non-security
+          echo "::endgroup::"
+
+      - name: Check SARIF presence
+        id: sarif_check
+        if: always()
+        run: |
+          if [[ -f results.sarif ]]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload SARIF artifact
+        if: always() && hashFiles('results.sarif') != ''
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808  # v4.3.3
+        with:
+          name: validate-sarif
+          path: results.sarif
+          if-no-files-found: error
+          retention-days: 1
+
+  detect-changes:
+    name: Detect changed modules
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: repo-baseline
+    if: needs.repo-baseline.result == 'success'
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.build-matrix.outputs.matrix || '{"include":[]}' }}
+      has_changes: ${{ steps.build-matrix.outputs.has_changes || 'false' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Setup Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+        with:
+          python-version: ${{ needs.repo-baseline.outputs.python_version }}
+
+      - name: Detect shared validation triggers
+        id: shared-changes
+        run: |
+          set -euo pipefail
+          HEAD_REF="${{ github.sha }}"
+          EVENT_NAME="${{ github.event_name }}"
+
+          if [[ "${EVENT_NAME}" == "pull_request" && -n "${{ github.event.pull_request.base.sha }}" ]]; then
+            BASE_REF="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE_REF="${{ github.event.before }}"
+            if [[ "${BASE_REF}" == "0000000000000000000000000000000000000000" ]]; then BASE_REF="HEAD~1"; fi
+          fi
+
+          if [[ -z "${BASE_REF}" || "${BASE_REF}" == "null" ]]; then
+            BASE_REF="$(git rev-parse HEAD~1 || true)"
+          fi
+
+          echo "Base: ${BASE_REF}"
+          echo "Head: ${HEAD_REF}"
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            if [[ "${{ inputs.mode }}" == "full" || "${{ inputs.bypass_change_detection }}" == "true" ]]; then
+              echo "force_full_matrix=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+
+          if [[ -z "${BASE_REF}" ]]; then
+            echo "force_full_matrix=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if git diff --name-only "${BASE_REF}" "${HEAD_REF}" | grep -E -q \
+            '^(tooling/|scripts/|catalog/|docs/|catalog/modules\.yaml$|Makefile$|Taskfile\.yml$|justfile$|\.editorconfig$|\.terraform-docs\.yml$|\.pre-commit-config\.yaml$|go\.mod$|go\.sum$|^\.github/workflows/.*\.yml$)'; then
+            echo "force_full_matrix=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "force_full_matrix=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Detect changes
+        id: detect
+        run: |
+          set -euo pipefail
+          HEAD_REF="${{ github.sha }}"
+          EVENT_NAME="${{ github.event_name }}"
+
+          if [[ "${EVENT_NAME}" == "pull_request" && -n "${{ github.event.pull_request.base.sha }}" ]]; then
+            BASE_REF="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE_REF="${{ github.event.before }}"
+            if [[ "${BASE_REF}" == "0000000000000000000000000000000000000000" ]]; then BASE_REF="HEAD~1"; fi
+          fi
+
+          if [[ -z "${BASE_REF}" || "${BASE_REF}" == "null" ]]; then
+            BASE_REF="$(git rev-parse HEAD~1 || true)"
+          fi
+
+          echo "Base: ${BASE_REF}"
+          echo "Head: ${HEAD_REF}"
+
+          # Fail fast if change detection is broken; do not silently downgrade to [].
+          go run ./scripts/ci/detect-changes.go \
+            --base "${BASE_REF}" \
+            --head "${HEAD_REF}" > /tmp/changed-modules.json
+
+          cat /tmp/changed-modules.json
+
+      - name: Build matrix
+        id: build-matrix
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.mode }}" == "module" ]]; then
+            CLEANED_PATH="${{ inputs.module_path }}"
+            if [[ ! "$CLEANED_PATH" =~ ^modules/[a-zA-Z0-9_-]+$ ]]; then
+              echo "::error::Invalid module path pattern."
+              exit 1
+            fi
+            if [[ ! -d "$CLEANED_PATH" ]]; then
+              echo "::error::module_path '$CLEANED_PATH' does not exist"
+              exit 1
+            fi
+            jq -nc --arg p "$CLEANED_PATH" '
+              { include: [ { name: ($p|split("/")|last), path: $p } ] }
+            ' > /tmp/matrix.json
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            echo "matrix=$(jq -c . /tmp/matrix.json)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ "${{ steps.shared-changes.outputs.force_full_matrix }}" == "true" ]]; then
+            echo "Shared validation trigger detected; building full module matrix."
+
+            jq -nc '
+              {
+                include: [
+                  inputs
+                  | select(length > 0)
+                  | {
+                      name: (. | split("/") | last),
+                      path: .
+                    }
+                ]
+              }
+            ' < <(
+              find modules -mindepth 1 -maxdepth 1 -type d | sort
+            ) > /tmp/matrix.json
+          else
+            python3 ./scripts/ci/build-matrix.py \
+              --modules-root modules \
+              --changes-file /tmp/changed-modules.json \
+              --out /tmp/matrix.json
+          fi
+
+          echo "Generated matrix:"
+          cat /tmp/matrix.json
+
+          MATRIX_JSON="$(jq -c . /tmp/matrix.json)"
+          HAS_CHANGES=$(jq -r '.include | length > 0' /tmp/matrix.json)
+          if ! jq -e . >/dev/null 2>&1 <<<"${MATRIX_JSON}"; then
+            echo "::error::Generated matrix is not valid JSON"
+            echo "${MATRIX_JSON}"
+            exit 1
+          fi
+
+          echo "has_changes=${HAS_CHANGES}" >> "$GITHUB_OUTPUT"
+          echo "matrix=${MATRIX_JSON}" >> "$GITHUB_OUTPUT"
+
+  validate-modules:
+    name: Validate modules
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [repo-baseline, detect-changes]
+    if: >-
+      always() &&
+      needs.repo-baseline.result == 'success' &&
+      needs.detect-changes.result == 'success' &&
+      needs.detect-changes.outputs.has_changes == 'true'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.detect-changes.outputs.matrix || '{"include":[]}') }}
+    permissions:
+      contents: read
+      pull-requests: read
+
+    defaults:
+      run:
+        working-directory: ${{ matrix.path }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@1044a6dea927916f2c38ba5aeffbc0a847b1221a  # v7.0.0
+
+      - name: Prepare Terraform plugin cache
+        run: mkdir -p "${TF_PLUGIN_CACHE_DIR}"
+
+      - name: Cache Terraform plugins and providers
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+          key: ${{ runner.os }}-tf-v3-${{ needs.repo-baseline.outputs.terraform_version }}-${{ hashFiles(format('{0}/.terraform.lock.hcl', matrix.path), 'tooling/.terraform-version', 'tooling/.tool-versions') }}
+          restore-keys: |
+            ${{ runner.os }}-tf-v3-${{ needs.repo-baseline.outputs.terraform_version }}-
+
+      - name: Setup Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify Go module integrity
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          go mod verify
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e  # v4.0.1
+        with:
+          terraform_version: ${{ needs.repo-baseline.outputs.terraform_version }}
+          terraform_wrapper: false
+
+      - name: Setup Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+        with:
+          python-version: ${{ needs.repo-baseline.outputs.python_version }}
+
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@6e1e0642c0289bd619021bf6b34e3c08ed1e005a  # v6.3.0
+        with:
+          tflint_version: ${{ needs.repo-baseline.outputs.tflint_version }}
+
+      - name: Install terraform-docs CLI
+        run: |
+          set -euo pipefail
+
+          VERSION="${{ needs.repo-baseline.outputs.terraform_docs_version }}"
+          BIN_DIR="${HOME}/.local/bin"
+          RELEASE_BASE_URL="https://github.com/terraform-docs/terraform-docs/releases/download/v${VERSION}"
+          ARCHIVE_NAME="terraform-docs-v${VERSION}-linux-amd64.tar.gz"
+          ARCHIVE_PATH="/tmp/${ARCHIVE_NAME}"
+          CHECKSUM_FILE="/tmp/terraform-docs-v${VERSION}.sha256sum"
+
+          mkdir -p "${BIN_DIR}"
+
+          curl -fsSL "${RELEASE_BASE_URL}/${ARCHIVE_NAME}" -o "${ARCHIVE_PATH}"
+          curl -fsSL "${RELEASE_BASE_URL}/terraform-docs-v${VERSION}.sha256sum" -o "${CHECKSUM_FILE}"
+
+          EXPECTED_SUM="$(
+            awk -v file="${ARCHIVE_NAME}" '
+              $0 ~ file { print $1; found=1; exit }
+              END { if (!found) exit 1 }
+            ' "${CHECKSUM_FILE}"
+          )"
+
+          if [[ -z "${EXPECTED_SUM}" ]]; then
+            echo "::error::Unable to find checksum for ${ARCHIVE_NAME} in ${CHECKSUM_FILE}"
+            exit 1
+          fi
+
+          echo "${EXPECTED_SUM}  ${ARCHIVE_PATH}" | sha256sum --check --status
+
+          tar -xzf "${ARCHIVE_PATH}" -C /tmp
+          install -m 0755 /tmp/terraform-docs "${BIN_DIR}/terraform-docs"
+          echo "${BIN_DIR}" >> "${GITHUB_PATH}"
+
+      - name: Terraform FMT check
+        run: terraform fmt -check -recursive
+
+      - name: Ensure lockfile exists
+        run: |
+          set -euo pipefail
+          if [[ ! -f ".terraform.lock.hcl" ]]; then
+            echo "::error file=${{ matrix.path }}/.terraform.lock.hcl::Missing lockfile. Policy requires committed lockfile for deterministic provider resolution."
+            exit 1
+          fi
+
+      - name: Terraform Init (no backend, lockfile readonly)
+        run: terraform init -lockfile=readonly
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: Examples contract check
+        run: |
+          set -euo pipefail
+          if [[ -d "examples" ]]; then
+            if [[ ! -f "examples/basic/main.tf" ]]; then
+              echo "::error file=${{ matrix.path }}/examples/basic/main.tf::Missing required examples/basic/main.tf"
+              exit 1
+            fi
+          fi
+
+      - name: Terraform tests (tftest.hcl)
+        run: |
+          set -euo pipefail
+          if find tests -type f -name "*.tftest.hcl" | grep -q . || [[ -f "tests/tftest.hcl" ]]; then
+            terraform test -no-color
+          fi
+
+      - name: Cache TFLint plugins
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ~/.tflint.d/plugins
+          key: ${{ runner.os }}-tflint-plugins-v1-${{ needs.repo-baseline.outputs.tflint_version }}
+
+      - name: TFLint init
+        run: tflint --init --config "${GITHUB_WORKSPACE}/${{ env.TFLINT_CONFIG }}"
+
+      - name: TFLint scan
+        run: tflint --config "${GITHUB_WORKSPACE}/${{ env.TFLINT_CONFIG }}"
+
+      - name: Terraform Docs check (In-place check)
+        run: terraform-docs --config "${GITHUB_WORKSPACE}/.terraform-docs.yml" . --check
+
+      - name: Upload Lockfile for analysis
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: lockfile-${{ matrix.name }}
+          path: |
+            ${{ matrix.path }}/.terraform.lock.hcl
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## ✅ Module Validation"
+            echo "- Module: \`${{ matrix.name }}\`"
+            echo "- Path: \`${{ matrix.path }}\`"
+            echo "- Commit: \`${{ github.sha }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  fallback-validate-all:
+    name: No module changes fallback
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [repo-baseline, detect-changes]
+    permissions:
+      contents: read
+    if: needs.detect-changes.outputs.has_changes != 'true'
+    steps:
+      - name: Summary
+        run: |
+          {
+            echo "## ℹ️ Validation Fallback"
+            echo "No module-scoped or shared validation-trigger changes detected; executed repository-wide baseline checks only."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  upload-sarif:
+    name: Upload SARIF
+    runs-on: ubuntu-latest
+    needs: repo-baseline
+    if: always() && needs.repo-baseline.outputs.sarif_exists == 'true'
+    permissions:
+      security-events: write
+    steps:
+      - name: Download SARIF artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: validate-sarif
+          path: .
+
+      - name: Upload SARIF to GitHub
+        uses: github/codeql-action/upload-sarif@54f647b7e1bb85c95cddabcd46b0c578ec92bc1a  # v4.36.3
+        with:
+          sarif_file: results.sarif
+
+  all-validate-chacks-pass:
+    name: CI gate (all checks passed)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [repo-baseline, detect-changes, validate-modules, fallback-validate-all, upload-sarif]
+    if: always()
+    permissions: {}
+    steps:
+      - name: Check all jobs
+        run: |
+          results='${{ toJson(needs) }}'
+          for job in repo-baseline detect-changes validate-modules fallback-validate-all upload-sarif; do
+            result=$(echo "$results" | jq -r --arg j "$job" '.[$j].result // "missing"')
+            if [[ "$result" != "success" && "$result" != "skipped" ]]; then
+              echo "::error::Job '$job' did not pass (result: $result)"
+              exit 1
+            fi
+          done
+          echo "All required jobs passed or were skipped."
