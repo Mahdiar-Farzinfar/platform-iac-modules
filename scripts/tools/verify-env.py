@@ -138,8 +138,6 @@ def run_command(cmd: List[str], timeout: int = DEFAULT_CMD_TIMEOUT) -> Tuple[int
         return 127, "", f"Command not found: {cmd[0]}"
     except subprocess.TimeoutExpired:
         return 124, "", f"Command timed out after {timeout}s: {' '.join(cmd)}"
-    except KeyboardInterrupt:
-        return 130, "", f"Command interrupted: {' '.join(cmd)}"
     except OSError as exc:
         return 1, "", f"OS error while running {' '.join(cmd)}: {exc}"
     except Exception as exc:
