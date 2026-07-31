@@ -438,7 +438,7 @@ tasks:
       - gitleaks detect --verbose --source "{{.ROOT_DIR}}" --no-git
 
   security:all:
-    desc: Run all security scans (Checkov  Trivy  Tfsec  Gitleaks)
+    desc: Run all security scans (Checkov  Trivy  Gitleaks)
     deps:
       - security
       - security:gitleaks
