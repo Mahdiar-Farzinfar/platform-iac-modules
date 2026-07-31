@@ -246,8 +246,8 @@ jobs:
         id: vars
         run: |
           set -euo pipefail
-          owner_lc="$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
-          echo "image=ghcr.io/${owner_lc}/platform-iac-modules" >> "$GITHUB_OUTPUT"
+          repo_lc="$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+          echo "image=ghcr.io/${repo_lc}/devcontainer" >> "${GITHUB_OUTPUT}"
 
       - name: Set up QEMU
         if: steps.validate.outputs.files_exist == 'true'
