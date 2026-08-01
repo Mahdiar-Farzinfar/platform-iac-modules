@@ -6,7 +6,7 @@
 ## - Versions synced from tooling/.tool-versions (SoT)
 ## - Tool installation delegated to scripts/tools/install-tools-posix.go (DRY)
 
-ARG BASE_IMAGE=mcr.microsoft.com/devcontainers/base:debian-12@sha256:a0a7a7e9a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0
+ARG BASE_IMAGE=mcr.microsoft.com/devcontainers/base:2-debian-12@sha256:23fa69fed758b7927c60061317d73baf7d66b9fca5c344e80bce3a940b229af0
 FROM ${BASE_IMAGE}
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
