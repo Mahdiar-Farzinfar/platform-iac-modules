@@ -125,7 +125,28 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-  # -----------------------------
+# -----------------------------
+# Install Go
+# -----------------------------
+RUN set -euo pipefail && \
+    source /usr/local/etc/devcontainer-tool-versions.env && \
+    GO_VER="${GO_VERSION:-1.22.3}" && \
+    echo "[go] Installing Go ${GO_VER}..." && \
+    ARCH="$(dpkg --print-architecture)" && \
+    case "${ARCH}" in \
+      amd64) GOARCH="amd64" ;; \
+      arm64) GOARCH="arm64" ;; \
+      *) echo "Unsupported architecture: ${ARCH}" && exit 1 ;; \
+    esac && \
+    curl -fsSL "https://go.dev/dl/go${GO_VER}.linux-${GOARCH}.tar.gz" | \
+    tar -C /usr/local -xzf - && \
+    ln -sf /usr/local/go/bin/go /usr/local/bin/go && \
+    ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt && \
+    go version && \
+    echo "[go] Go ${GO_VER} installed at /usr/local/go"
+
+
+# -----------------------------
 # Sync versions → call Go installer
 # -----------------------------
 RUN /usr/local/bin/sync-tool-versions.sh && \
@@ -135,6 +156,7 @@ RUN /usr/local/bin/sync-tool-versions.sh && \
       arm64) GOARCH="arm64" ;; \
       *) echo "Unsupported architecture: ${ARCH}" && exit 1 ;; \
     esac && \
+    echo "[build] Building install-tools installer..." && \
     GOARCH="${GOARCH}" go build -trimpath -o /tmp/install-tools /tmp/install-tools-posix.go && \
     /tmp/install-tools --tool-versions-file /tmp/tooling/.tool-versions \
                        --asdf-tool-versions-file /tmp/tooling/asdf-tool-versions \
