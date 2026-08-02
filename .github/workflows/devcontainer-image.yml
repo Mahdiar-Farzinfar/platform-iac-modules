@@ -129,158 +129,161 @@ jobs:
         run: |
           set -euo pipefail
 
-          docker run --rm -i --entrypoint bash local/devcontainer:pr <<'"'"'BASH'"'"'
-            set -euo pipefail
+          docker run --rm -i --entrypoint bash local/devcontainer:pr -s <<'BASH'
+          set -euo pipefail
 
-            resolve_bin() {
-              readlink -f "$(command -v "$1")"
-            }
+          resolve_bin() {
+            readlink -f "$(command -v "$1")"
+          }
 
-            echo "[1] Identity / permissions"
-            id
-            test "$(id -u)" -ne 0
-            whoami | grep -E "^vscode$"
-            sudo -n true
+          echo "[1] Identity / permissions"
+          id
+          test "$(id -u)" -ne 0
+          whoami | grep -E "^vscode$"
+          sudo -n true
 
-            echo "[2] Runtime defaults / critical files"
-            test -f /usr/local/etc/devcontainer-tool-versions.env
-            source /usr/local/etc/devcontainer-tool-versions.env
-            test -d /workspaces
-            pwd
+          echo "[2] Runtime defaults / critical files"
+          test -f /usr/local/etc/devcontainer-tool-versions.env
+          # shellcheck source=/dev/null
+          source /usr/local/etc/devcontainer-tool-versions.env
+          test -d /workspaces
+          pwd
 
-            echo "[3] Toolchain presence + version commands"
-            # Core IaC
-            terraform version
-            tflint --version
-            trivy --version
-            terraform-docs --version
+          echo "[3] Toolchain presence + version commands"
+          # Core IaC
+          terraform version
+          tflint --version
+          trivy --version
+          terraform-docs --version
 
-            # Security & secrets
-            gitleaks version
-            checkov --version
+          # Security & secrets
+          gitleaks version
+          checkov --version
 
-            # CI/CD & automation
-            actionlint --version
-            task --version
+          # CI/CD & automation
+          actionlint --version
+          task --version
+          # Code quality & formatting
+          shfmt --version
+          yamllint --version
+          markdownlint-cli2 --version
+          golangci-lint --version
+          pre-commit --version
 
-            # Code quality & formatting
-            shfmt --version
-            yamllint --version
-            markdownlint-cli2 --version
-            golangci-lint --version
-            pre-commit --version
+          # Task runners
+          just --version
 
-            # Task runners
-            just --version
+          # Languages
+          go version
+          node --version
+          python --version
 
-            # Languages
-            go version
-            node --version
-            python --version
+          # Conditional tools
+          if [ "${INSTALL_AWSCLI:-}" = "true" ]; then aws --version; fi
+          if [ "${INSTALL_DOCKER_CLI:-}" = "true" ]; then
+            docker --version
+            docker compose version
+            docker-compose --version
+          fi
 
-            # Conditional tools (read from env)
-            if [ "${INSTALL_AWSCLI:-}" = "true" ]; then aws --version; fi
-            if [ "${INSTALL_DOCKER_CLI:-}" = "true" ]; then
-              docker --version
-              docker compose version
-              docker-compose --version
+          echo "[4] PATH / venv precedence checks"
+          export PATH="/opt/python-tools/bin:${PATH}"
+          hash -r
+
+          for tool in checkov pre-commit; do
+            bin_path="/opt/python-tools/bin/${tool}"
+            if [[ ! -x "${bin_path}" ]]; then
+              echo "::error::Missing expected binary: ${bin_path}" >&2
+              echo "PATH=${PATH}" >&2
+              exit 1
             fi
 
-            echo "[4] PATH / venv precedence checks"
-            for tool in checkov pre-commit; do
-              resolved="$(resolve_bin "${tool}")"
-              echo "${tool} -> $(command -v "${tool}") (resolved: ${resolved})"
-              case "${resolved}" in
-                /opt/python-tools/bin/${tool}) ;;
-                *)
-                  echo "::error::Expected ${tool} to resolve to /opt/python-tools/bin/${tool}, got: ${resolved}" >&2
-                  echo "PATH=${PATH}" >&2
-                  exit 1
-                  ;;
-              esac
-            done
+            resolved="$(resolve_bin "${tool}")"
+            echo "${tool} -> $(command -v "${tool}") (resolved: ${resolved})"
+            if [[ "${resolved}" != "${bin_path}" ]]; then
+              echo "::error::Expected ${tool} to resolve to ${bin_path}, got: ${resolved}" >&2
+              echo "PATH=${PATH}" >&2
+              exit 1
+            fi
+          done
 
-            for tool in terraform tflint trivy terraform-docs gitleaks actionlint task shfmt just \
-                        yamllint markdownlint-cli2 golangci-lint go node python; do
-              if ! command -v "${tool}" >/dev/null 2>&1; then
-                echo "::error::Missing required tool on PATH: ${tool}" >&2
-                echo "PATH=${PATH}" >&2
-                exit 1
-              fi
-              echo "${tool} -> $(command -v "${tool}")"
-            done
+          for tool in terraform tflint trivy terraform-docs gitleaks actionlint task shfmt just \
+                      yamllint markdownlint-cli2 golangci-lint go node python; do
+            if ! command -v "${tool}" >/dev/null 2>&1; then
+              echo "::error::Missing required tool on PATH: ${tool}" >&2
+              echo "PATH=${PATH}" >&2
+              exit 1
+            fi
+            echo "${tool} -> $(command -v "${tool}")"
+          done
 
-            echo "PATH=${PATH}"
-            echo "${PATH}" | awk -F: '{for(i=1;i<=NF&&i<=5;i++) print $i}'
+          echo "PATH=${PATH}"
+          echo "${PATH}" | awk -F: '{for(i=1;i<=NF&&i<=5;i++) print $i}'
 
-            echo "[5] Minimal functional checks"
-            tmpd="$(mktemp -d)"
-            trap "rm -rf \"$tmpd\"" EXIT
+          echo "[5] Minimal functional checks"
+          tmpd="$(mktemp -d)"
+          trap 'rm -rf "${tmpd}"' EXIT
 
-            # Terraform init/validate minimal
-            cat > "$tmpd/main.tf" <<EOF
-            terraform {
-              required_version = ">= 1.0.0"
-            }
-            EOF
-            terraform -chdir="$tmpd" init -backend=false -input=false -no-color
-            terraform -chdir="$tmpd" validate -no-color
+          # Terraform init/validate minimal
+          printf '%s\n' \
+            'terraform {' \
+            '  required_version = ">= 1.0.0"' \
+            '}' > "${tmpd}/main.tf"
+          terraform -chdir="${tmpd}" init -backend=false -input=false -no-color
+          terraform -chdir="${tmpd}" validate -no-color
 
-            # tflint on minimal config
-            cat > "$tmpd/.tflint.hcl" <<EOF
-            config {
-              module = false
-            }
-            EOF
-            tflint --chdir "$tmpd"
+          # tflint on minimal config
+          printf '%s\n' \
+            'config {' \
+            '  module = false' \
+            '}' > "${tmpd}/.tflint.hcl"
+          tflint --chdir "${tmpd}"
 
-            # checkov minimal scan
-            checkov -d "$tmpd" --quiet || true
+          # checkov minimal scan
+          checkov -d "${tmpd}" --quiet || true
 
-            # gitleaks detect (dry-run on empty repo)
-            mkdir -p "$tmpd/gitrepo" && cd "$tmpd/gitrepo"
-            git init
-            gitleaks detect --source . --verbose --exit-code 0 || true
-            cd "$tmpd"
+          # gitleaks detect (dry-run on empty repo)
+          mkdir -p "${tmpd}/gitrepo"
+          git -C "${tmpd}/gitrepo" init
+          gitleaks detect --source "${tmpd}/gitrepo" --verbose --exit-code 0 || true
 
-            # actionlint on minimal workflow
-            mkdir -p "$tmpd/.github/workflows"
-            cat > "$tmpd/.github/workflows/test.yml" <<EOF
-            name: test
-            on: push
-            jobs:
-              test:
-                runs-on: ubuntu-latest
-                steps:
-                  - uses: actions/checkout@v4
-            EOF
-            actionlint "$tmpd/.github/workflows/test.yml"
+          # actionlint on minimal workflow
+          mkdir -p "${tmpd}/.github/workflows"
+          printf '%s\n' \
+            'name: test' \
+            'on: push' \
+            'jobs:' \
+            '  test:' \
+            '    runs-on: ubuntu-latest' \
+            '    steps:' \
+            '      - uses: actions/checkout@v4' \
+            > "${tmpd}/.github/workflows/test.yml"
+          actionlint "${tmpd}/.github/workflows/test.yml"
 
-            # shfmt check formatting
-            echo "#!/bin/bash" > "$tmpd/script.sh"
-            shfmt -d "$tmpd/script.sh" >/dev/null
+          # shfmt check formatting
+          printf '%s\n' '#!/bin/bash' > "${tmpd}/script.sh"
+          shfmt -d "${tmpd}/script.sh" >/dev/null
 
-            # task minimal Taskfile
-            cat > "$tmpd/Taskfile.yml" <<EOF
-            version: "3"
-            tasks:
-              hello:
-                cmds:
-                  - echo "hello"
-            EOF
-            task -d "$tmpd" hello
+          # task minimal Taskfile
+          printf '%s\n' \
+            'version: "3"' \
+            'tasks:' \
+            '  hello:' \
+            '    cmds:' \
+            '      - echo "hello"' \
+            > "${tmpd}/Taskfile.yml"
+          task -d "${tmpd}" hello
 
-            # terraform-docs on minimal module
-            mkdir -p "$tmpd/mod"
-            cat > "$tmpd/mod/variables.tf" <<EOF
-            variable "name" {
-              type = string
-              description = "sample"
-            }
-            EOF
-            terraform-docs markdown table "$tmpd/mod" >/dev/null
+          # terraform-docs on minimal module
+          mkdir -p "${tmpd}/mod"
+          printf '%s\n' \
+            'variable "name" {' \
+            '  type = string' \
+            '  description = "sample"' \
+            '}' > "${tmpd}/mod/variables.tf"
+          terraform-docs markdown table "${tmpd}/mod" >/dev/null
 
-            echo "[6] Done"
+          echo "[6] Done"
           BASH
 
   publish-sign-scan:
