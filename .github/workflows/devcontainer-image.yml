@@ -129,7 +129,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          docker run --rm --entrypoint bash local/devcontainer:pr -lc '
+          docker run --rm -i --entrypoint bash local/devcontainer:pr <<'"'"'BASH'"'"'
             set -euo pipefail
 
             resolve_bin() {
@@ -281,7 +281,7 @@ jobs:
             terraform-docs markdown table "$tmpd/mod" >/dev/null
 
             echo "[6] Done"
-          '
+          BASH
 
   publish-sign-scan:
     name: Build, Push, Sign, Scan (Main/Manual only)
