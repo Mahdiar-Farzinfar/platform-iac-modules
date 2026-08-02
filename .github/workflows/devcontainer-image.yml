@@ -211,7 +211,7 @@ jobs:
             done
 
             echo "PATH=${PATH}"
-            echo "${PATH}" | tr ':' $'\n' | head -n 5
+            echo "${PATH}" | awk -F: '{for(i=1;i<=NF&&i<=5;i++) print $i}'
 
             echo "[5] Minimal functional checks"
             tmpd="$(mktemp -d)"
