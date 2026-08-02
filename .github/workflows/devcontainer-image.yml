@@ -191,7 +191,7 @@ jobs:
               resolved="$(resolve_bin "${tool}")"
               echo "${tool} -> $(command -v "${tool}") (resolved: ${resolved})"
               case "${resolved}" in
-                /opt/python-tools/bin/"${tool}") ;;
+                /opt/python-tools/bin/${tool}) ;;
                 *)
                   echo "::error::Expected ${tool} to resolve to /opt/python-tools/bin/${tool}, got: ${resolved}" >&2
                   echo "PATH=${PATH}" >&2
