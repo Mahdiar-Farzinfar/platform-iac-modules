@@ -290,6 +290,16 @@ RUN mkdir -p \
 # Build-time sanity checks (fail-fast)
 # -----------------------------
 RUN set -euo pipefail && \
+    printf 'export PATH="%s:$PATH"\n' \
+      "/usr/local/share/mise/shims:/usr/local/share/asdf/shims:/usr/local/bin:/usr/local/go/bin:${PYTHON_TOOLS_VENV}/bin:/home/${USERNAME}/.local/bin" \
+      >> "/home/${USERNAME}/.bashrc" && \
+    chown ${USERNAME}:${USERNAME} "/home/${USERNAME}/.bashrc" && \
+    echo "[bashrc] PATH appended for user ${USERNAME}"
+
+# -----------------------------
+# Build-time sanity checks (root) – existing
+# -----------------------------
+RUN set -euo pipefail && \
     source /usr/local/etc/devcontainer-tool-versions.env && \
     echo "[sanity] PATH=${PATH}" && \
     command -v terraform && \
@@ -316,6 +326,16 @@ RUN set -euo pipefail && \
         docker-compose --version; \
     fi && \
     echo "[sanity] All tools verified OK"
+
+# -----------------------------
+# Final sanity check as vscode (non-root)
+# -----------------------------
+USER ${USERNAME}
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+RUN set -euo pipefail && \
+    command -v terraform && \
+    terraform version && \
+    echo "[sanity-vscode] All tools accessible for user ${USERNAME}"
 
 # -----------------------------
 # Runtime defaults
