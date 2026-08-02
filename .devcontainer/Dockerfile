@@ -287,6 +287,16 @@ RUN mkdir -p \
     chmod -R a+rX /usr/local/share/mise /usr/local/share/asdf /usr/local/bin || true
 
 # -----------------------------
+# System-wide PATH for login shells
+# -----------------------------
+RUN set -euo pipefail && \
+    CUSTOM_PATH="/usr/local/share/mise/shims:/usr/local/share/asdf/shims:/usr/local/bin:/usr/local/go/bin:${PYTHON_TOOLS_VENV}/bin:/home/${USERNAME}/.local/bin" && \
+    mkdir -p /etc/profile.d && \
+    printf 'export PATH="%s:$PATH"\n' "${CUSTOM_PATH}" > /etc/profile.d/99-devcontainer-path.sh && \
+    chmod 644 /etc/profile.d/99-devcontainer-path.sh && \
+    echo "[profile.d] System PATH configured for login shells"
+
+# -----------------------------
 # Build-time sanity checks (fail-fast)
 # -----------------------------
 RUN set -euo pipefail && \
