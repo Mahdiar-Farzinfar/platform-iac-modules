@@ -328,6 +328,7 @@ RUN set -euo pipefail && \
     pre-commit --version && \
     checkov --version && \
     yamllint --version && \
+    markdownlint-cli2 --version && \
     golangci-lint --version && \
     if [ "${INSTALL_AWSCLI}" = "true" ]; then aws --version; fi && \
     if [ "${INSTALL_DOCKER_CLI}" = "true" ]; then \

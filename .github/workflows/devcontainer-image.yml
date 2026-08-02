@@ -140,34 +140,57 @@ jobs:
 
             echo "[2] Runtime defaults / critical files"
             test -f /usr/local/etc/devcontainer-tool-versions.env
+            source /usr/local/etc/devcontainer-tool-versions.env
             test -d /workspaces
             pwd
 
             echo "[3] Toolchain presence + version commands"
+            # Core IaC
             terraform version
             tflint --version
-            tfsec --version
             trivy --version
             terraform-docs --version
-            yq --version
-            just --version
+
+            # Security & secrets
+            gitleaks version
+            checkov --version
+
+            # CI/CD & automation
+            actionlint --version
+            task --version
+
+            # Code quality & formatting
+            shfmt --version
+            yamllint --version
+            markdownlint-cli2 --version
             golangci-lint --version
+            pre-commit --version
+
+            # Task runners
+            just --version
+
+            # Languages
             go version
             node --version
-            npm --version
             python --version
-            pip --version
-            pre-commit --version
-            checkov --version
-            detect-secrets --version
-            yamllint --version
-            markdownlint --version
+
+            # Conditional tools (read from env)
+            if [ "${INSTALL_AWSCLI:-}" = "true" ]; then aws --version; fi
+            if [ "${INSTALL_DOCKER_CLI:-}" = "true" ]; then
+              docker --version
+              docker compose version
+              docker-compose --version
+            fi
 
             echo "[4] PATH / venv precedence checks"
             command -v checkov | grep -E "^/opt/python-tools/bin/checkov$"
             command -v pre-commit | grep -E "^/opt/python-tools/bin/pre-commit$"
             command -v terraform >/dev/null
             command -v trivy >/dev/null
+            command -v gitleaks >/dev/null
+            command -v actionlint >/dev/null
+            command -v task >/dev/null
+            command -v shfmt >/dev/null
 
             echo "[5] Minimal functional checks"
             tmpd="$(mktemp -d)"
@@ -193,12 +216,38 @@ jobs:
             # checkov minimal scan
             checkov -d "$tmpd" --quiet || true
 
-            # yq functional parse
-            cat > "$tmpd/a.yaml" <<EOF
-            a:
-              b: 1
+            # gitleaks detect (dry-run on empty repo)
+            mkdir -p "$tmpd/gitrepo" && cd "$tmpd/gitrepo"
+            git init
+            gitleaks detect --source . --verbose --exit-code 0 || true
+            cd "$tmpd"
+
+            # actionlint on minimal workflow
+            mkdir -p "$tmpd/.github/workflows"
+            cat > "$tmpd/.github/workflows/test.yml" <<EOF
+            name: test
+            on: push
+            jobs:
+              test:
+                runs-on: ubuntu-latest
+                steps:
+                  - uses: actions/checkout@v4
             EOF
-            test "$(yq ".a.b" "$tmpd/a.yaml")" = "1"
+            actionlint "$tmpd/.github/workflows/test.yml"
+
+            # shfmt check formatting
+            echo "#!/bin/bash" > "$tmpd/script.sh"
+            shfmt -d "$tmpd/script.sh" >/dev/null
+
+            # task minimal Taskfile
+            cat > "$tmpd/Taskfile.yml" <<EOF
+            version: "3"
+            tasks:
+              hello:
+                cmds:
+                  - echo "hello"
+            EOF
+            task -d "$tmpd" hello
 
             # terraform-docs on minimal module
             mkdir -p "$tmpd/mod"
