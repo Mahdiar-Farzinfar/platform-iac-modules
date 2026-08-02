@@ -132,6 +132,10 @@ jobs:
           docker run --rm --entrypoint bash local/devcontainer:pr -lc '
             set -euo pipefail
 
+            resolve_bin() {
+              readlink -f "$(command -v "$1")"
+            }
+
             echo "[1] Identity / permissions"
             id
             test "$(id -u)" -ne 0
@@ -183,14 +187,31 @@ jobs:
             fi
 
             echo "[4] PATH / venv precedence checks"
-            command -v checkov | grep -E "^/opt/python-tools/bin/checkov$"
-            command -v pre-commit | grep -E "^/opt/python-tools/bin/pre-commit$"
-            command -v terraform >/dev/null
-            command -v trivy >/dev/null
-            command -v gitleaks >/dev/null
-            command -v actionlint >/dev/null
-            command -v task >/dev/null
-            command -v shfmt >/dev/null
+            for tool in checkov pre-commit; do
+              resolved="$(resolve_bin "${tool}")"
+              echo "${tool} -> $(command -v "${tool}") (resolved: ${resolved})"
+              case "${resolved}" in
+                /opt/python-tools/bin/"${tool}") ;;
+                *)
+                  echo "::error::Expected ${tool} to resolve to /opt/python-tools/bin/${tool}, got: ${resolved}" >&2
+                  echo "PATH=${PATH}" >&2
+                  exit 1
+                  ;;
+              esac
+            done
+
+            for tool in terraform tflint trivy terraform-docs gitleaks actionlint task shfmt just \
+                        yamllint markdownlint-cli2 golangci-lint go node python; do
+              if ! command -v "${tool}" >/dev/null 2>&1; then
+                echo "::error::Missing required tool on PATH: ${tool}" >&2
+                echo "PATH=${PATH}" >&2
+                exit 1
+              fi
+              echo "${tool} -> $(command -v "${tool}")"
+            done
+
+            echo "PATH=${PATH}"
+            echo "${PATH}" | tr ':' '\n' | head -n 5
 
             echo "[5] Minimal functional checks"
             tmpd="$(mktemp -d)"
