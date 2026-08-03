@@ -190,7 +190,25 @@ jobs:
           export PATH="/opt/python-tools/bin:${PATH}"
           hash -r
 
-          for tool in checkov pre-commit; do
+          checkov_bin="$(mise which checkov)"
+          checkov_install_dir="$(mise where checkov)"
+          if [[ -z "${checkov_bin}" || ! -x "${checkov_bin}" ]]; then
+            echo "::error::Missing mise-managed checkov executable: ${checkov_bin:-<empty>}" >&2
+            echo "mise install directory: ${checkov_install_dir:-<empty>}" >&2
+            echo "PATH=${PATH}" >&2
+            exit 1
+          fi
+          case "${checkov_bin}" in
+            "${checkov_install_dir}"/*) ;;
+            *)
+              echo "::error::checkov executable is outside its mise install directory: ${checkov_bin}" >&2
+              exit 1
+              ;;
+          esac
+          echo "checkov -> $(command -v checkov) (mise executable: ${checkov_bin}, install directory: ${checkov_install_dir})"
+          "${checkov_bin}" --version
+
+          for tool in pre-commit; do
             bin_path="/opt/python-tools/bin/${tool}"
             if [[ ! -x "${bin_path}" ]]; then
               echo "::error::Missing expected binary: ${bin_path}" >&2
