@@ -1,0 +1,49 @@
+{
+  "name": "platform-iac-modules",
+  "image": "ghcr.io/mahdiar-farzinfar/platform-iac-modules/devcontainer:latest",
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "editor.formatOnSave": true,
+        "terraform.languageServerPath": "/home/vscode/.local/bin/terraform-ls",
+        "terraform.linter": "tflint",
+        "terraform.showDiagnosticsInHovers": true,
+        "terraform.showFormatCommands": true,
+        "terraform.validateOnSave": true,
+        "golangci-lint.linter": "golangci-lint",
+        "golangci-lint.format": "stylish",
+        "golangci-lint.workdir": "${workspaceFolder}",
+        "golangci-lint.version": "latest",
+        "go.toolsEnvVars": {
+          "GOPATH": "/home/vscode/go"
+        }
+      },
+      "extensions": [
+        "hashicorp.terraform",
+        "golang.go",
+        "ms-azuretools.vscode-docker",
+        "davidanson.vscode-markdownlint",
+        "editorconfig.editorconfig",
+        "github.vscode-github-actions",
+        "esbenp.prettier-vscode"
+      ],
+      "devPort": 3000
+    }
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/go:1": {
+      "version": "1.22.3"
+    },
+    "ghcr.io/devcontainers/features/terraform:1": {
+      "version": "1.15.6"
+    },
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  "remoteUser": "vscode",
+  "forwardPorts": [],
+  "postCreateCommand": "bash -lc 'source /usr/local/etc/devcontainer-tool-versions.env && sync-tool-versions.sh'",
+  "updateRemoteUserUID": true,
+  "overrideCommand": false,
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces,type=bind",
+  "workspaceFolder": "/workspaces"
+}
