@@ -24,7 +24,7 @@ permissions:
 
 concurrency:
   group: devcontainer-image-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   CONTEXT: .devcontainer
@@ -430,13 +430,56 @@ jobs:
       - name: Install Cosign
         if: steps.validate.outputs.files_exist == 'true'
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
+        with:
+          cosign-release: "v2.6.1"
+
+      - name: Show Cosign version
+        if: steps.validate.outputs.files_exist == 'true'
+        run: cosign version
 
       - name: Sign image by digest (keyless OIDC)
         if: steps.validate.outputs.files_exist == 'true'
         env:
           IMAGE: ${{ steps.vars.outputs.image }}
           DIGEST: ${{ steps.build_push.outputs.digest }}
-        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+          CERT_IDENTITY: "https://github.com/${{ github.repository }}/.github/workflows/devcontainer-image.yml@${{ github.ref }}"
+          CERT_ISSUER: "https://token.actions.githubusercontent.com"
+        run: |
+          set -euo pipefail
+
+          target="${IMAGE}@${DIGEST}"
+
+          verify_signature() {
+            cosign verify \
+              --certificate-identity "${CERT_IDENTITY}" \
+              --certificate-oidc-issuer "${CERT_ISSUER}" \
+              "${target}" >/dev/null 2>&1
+          }
+
+          if verify_signature; then
+            echo "A valid signature already exists for ${target}."
+            exit 0
+          fi
+
+          for attempt in 1 2 3; do
+            echo "Signing ${target} (attempt ${attempt}/3)..."
+
+            if cosign sign --yes "${target}"; then
+              break
+            fi
+
+            if verify_signature; then
+              echo "The signature is valid despite the signing command failure."
+              exit 0
+            fi
+
+            if (( attempt == 3 )); then
+              echo "::error::Cosign signing failed after ${attempt} attempts."
+              exit 1
+            fi
+
+            sleep $((attempt * 5))
+          done
 
       - name: Verify signature
         if: steps.validate.outputs.files_exist == 'true'
@@ -446,6 +489,8 @@ jobs:
           CERT_IDENTITY: "https://github.com/${{ github.repository }}/.github/workflows/devcontainer-image.yml@${{ github.ref }}"
           CERT_ISSUER: "https://token.actions.githubusercontent.com"
         run: |
+          set -euo pipefail
+
           cosign verify \
             --certificate-identity "${CERT_IDENTITY}" \
             --certificate-oidc-issuer "${CERT_ISSUER}" \
