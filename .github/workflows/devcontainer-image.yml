@@ -253,7 +253,7 @@ jobs:
           # tflint on minimal config
           printf '%s\n' \
             'config {' \
-            '  module = false' \
+            '  call_module_type = "none"' \
             '}' > "${tmpd}/.tflint.hcl"
           tflint --chdir "${tmpd}"
 
