@@ -187,8 +187,7 @@ jobs:
           fi
 
           echo "[4] PATH / venv precedence checks"
-          export PATH="/opt/python-tools/bin:${PATH}"
-          hash -r
+          echo "Validating mise-managed Python tooling and PATH resolution"
 
           checkov_bin="$(mise which checkov)"
           checkov_install_dir="$(mise where checkov)"
@@ -208,22 +207,23 @@ jobs:
           echo "checkov -> $(command -v checkov) (mise executable: ${checkov_bin}, install directory: ${checkov_install_dir})"
           "${checkov_bin}" --version
 
-          for tool in pre-commit; do
-            bin_path="/opt/python-tools/bin/${tool}"
-            if [[ ! -x "${bin_path}" ]]; then
-              echo "::error::Missing expected binary: ${bin_path}" >&2
-              echo "PATH=${PATH}" >&2
+          pre_commit_bin="$(mise which pre-commit)"
+          pre_commit_install_dir="$(mise where pre-commit)"
+          if [[ -z "${pre_commit_bin}" || ! -x "${pre_commit_bin}" ]]; then
+            echo "::error::Missing mise-managed pre-commit executable: ${pre_commit_bin:-<empty>}" >&2
+            echo "mise install directory: ${pre_commit_install_dir:-<empty>}" >&2
+            echo "PATH=${PATH}" >&2
+            exit 1
+          fi
+          case "${pre_commit_bin}" in
+            "${pre_commit_install_dir}"/*) ;;
+            *)
+              echo "::error::pre-commit executable is outside its mise install directory: ${pre_commit_bin}" >&2
               exit 1
-            fi
-
-            resolved="$(resolve_bin "${tool}")"
-            echo "${tool} -> $(command -v "${tool}") (resolved: ${resolved})"
-            if [[ "${resolved}" != "${bin_path}" ]]; then
-              echo "::error::Expected ${tool} to resolve to ${bin_path}, got: ${resolved}" >&2
-              echo "PATH=${PATH}" >&2
-              exit 1
-            fi
-          done
+              ;;
+          esac
+          echo "pre-commit -> $(command -v pre-commit) (mise executable: ${pre_commit_bin}, install directory: ${pre_commit_install_dir})"
+          "${pre_commit_bin}" --version
 
           for tool in terraform tflint trivy terraform-docs gitleaks actionlint task shfmt just \
                       yamllint markdownlint-cli2 golangci-lint go node python; do
