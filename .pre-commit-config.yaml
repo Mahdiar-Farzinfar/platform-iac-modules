@@ -84,11 +84,14 @@ repos:
       - id: actionlint
         files: ^\.github/workflows/.*\.ya?ml$
 
-  - repo: https://github.com/igorshubovych/markdownlint-cli
-    rev: v0.41.0
+  - repo: https://github.com/DavidAnson/markdownlint-cli2
+    rev: v0.17.2
     hooks:
-      - id: markdownlint
+      - id: markdownlint-cli2
         files: \.md$
+        args:
+          - --config
+          - tooling/.markdownlint-cli2.yaml
 
   - repo: https://github.com/antonbabenko/pre-commit-terraform
     rev: v1.96.3
