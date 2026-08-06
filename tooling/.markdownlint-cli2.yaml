@@ -1,0 +1,38 @@
+# .markdownlint-cli2.yaml
+config:
+  default: true
+
+  # Line length
+  MD013:
+    line_length: 400
+    code_blocks: false
+    tables: false
+    headings: true
+
+  # Allow duplicate headings in different sections
+  MD024:
+    siblings_only: true
+
+  # Ordered list style: 1. 2. 3.
+  MD029:
+    style: ordered
+
+  # Allow HTML when needed
+  MD033: false
+
+  # Trailing punctuation in headings
+  MD026:
+    punctuation: ".,;:!"
+
+  # Emphasis used instead of heading — keep enabled
+  MD036: true
+
+  # Bare URLs — allow for readability
+  MD034: false
+
+ignores:
+  - "**/node_modules/**"
+  - "**/dist/**"
+  - "**/build/**"
+  - "**/.git/**"
+  - "**/CHANGELOG.md"
