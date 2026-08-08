@@ -1,0 +1,144 @@
+# CODEOWNERS - platform-iac-modules
+# ==============================================================================
+# Purpose:
+#   Define required reviewers for paths in this repository.
+#   Last matching pattern wins.
+#
+# Ownership model:
+#   - Solo maintainer owns everything in this repository.
+#   - All critical paths are owned by @Mahdiar-Farzinfar.
+#
+# Notes:
+#   - This file is located at the repository root (CODEOWNERS).
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# Default ownership (everything not matched below)
+# ------------------------------------------------------------------------------
+*                                       @Mahdiar-Farzinfar
+
+# ------------------------------------------------------------------------------
+# Repository governance & root metadata
+# ------------------------------------------------------------------------------
+/README.md                              @Mahdiar-Farzinfar
+/SECURITY.md                            @Mahdiar-Farzinfar
+/CONTRIBUTING.md                        @Mahdiar-Farzinfar
+/CODE_OF_CONDUCT.md                     @Mahdiar-Farzinfar
+/CHANGELOG.md                           @Mahdiar-Farzinfar
+/LICENSE                                @Mahdiar-Farzinfar
+/CODEOWNERS                             @Mahdiar-Farzinfar
+
+# ------------------------------------------------------------------------------
+# Language / dependency manifests
+# ------------------------------------------------------------------------------
+/go.mod                                 @Mahdiar-Farzinfar
+/go.sum                                 @Mahdiar-Farzinfar
+
+# ------------------------------------------------------------------------------
+# Editor / local DX configuration
+# ------------------------------------------------------------------------------
+/.editorconfig                          @Mahdiar-Farzinfar
+/.gitignore                             @Mahdiar-Farzinfar
+/.gitattributes                         @Mahdiar-Farzinfar
+/.pre-commit-config.yaml                @Mahdiar-Farzinfar
+/.terraform-docs.yml                    @Mahdiar-Farzinfar
+/Taskfile.yml                           @Mahdiar-Farzinfar
+/justfile                               @Mahdiar-Farzinfar
+/Makefile                               @Mahdiar-Farzinfar
+
+# ------------------------------------------------------------------------------
+# Dev containers & IDE
+# ------------------------------------------------------------------------------
+/.devcontainer/                         @Mahdiar-Farzinfar
+/.vscode/                               @Mahdiar-Farzinfar
+
+# ------------------------------------------------------------------------------
+# GitHub automation, CI/CD, release, dependency management
+# ------------------------------------------------------------------------------
+/.github/                               @Mahdiar-Farzinfar
+/.github/workflows/                     @Mahdiar-Farzinfar
+/.github/workflows/security-scan.yml    @Mahdiar-Farzinfar
+/.github/workflows/release.yml          @Mahdiar-Farzinfar
+/.github/renovate.json                  @Mahdiar-Farzinfar
+/.github/PULL_REQUEST_TEMPLATE.md       @Mahdiar-Farzinfar
+
+# ------------------------------------------------------------------------------
+# Documentation
+# ------------------------------------------------------------------------------
+/docs/                                  @Mahdiar-Farzinfar
+/docs/security-baseline.md              @Mahdiar-Farzinfar
+/docs/module-development.md             @Mahdiar-Farzinfar
+/docs/versioning.md                     @Mahdiar-Farzinfar
+/docs/cross-platform.md                 @Mahdiar-Farzinfar
+
+# ------------------------------------------------------------------------------
+# Scripts & automation utilities
+# ------------------------------------------------------------------------------
+/scripts/                               @Mahdiar-Farzinfar
+/scripts/bootstrap/                     @Mahdiar-Farzinfar
+/scripts/ci/                            @Mahdiar-Farzinfar
+/scripts/tools/                         @Mahdiar-Farzinfar
+/scripts/windows/                       @Mahdiar-Farzinfar
+
+# ------------------------------------------------------------------------------
+# Shared tooling / linters / security scanners config
+# ------------------------------------------------------------------------------
+/tooling/                               @Mahdiar-Farzinfar
+/tooling/.tflint.hcl                    @Mahdiar-Farzinfar
+/tooling/.yamllint.yml                  @Mahdiar-Farzinfar
+/tooling/.terraform-version             @Mahdiar-Farzinfar
+/tooling/.tool-versions                 @Mahdiar-Farzinfar
+/tooling/.checkov.yml                   @Mahdiar-Farzinfar
+/tooling/.trivyignore                   @Mahdiar-Farzinfar
+/tooling/.markdownlint-cli2.yaml        @Mahdiar-Farzinfar
+/tooling/cross-platform/                @Mahdiar-Farzinfar
+
+# ------------------------------------------------------------------------------
+# Module catalog
+# ------------------------------------------------------------------------------
+/catalog/                               @Mahdiar-Farzinfar
+/catalog/modules.yaml                   @Mahdiar-Farzinfar
+
+# ------------------------------------------------------------------------------
+# Global tests (smoke / cross-platform)
+# ------------------------------------------------------------------------------
+/tests/                                 @Mahdiar-Farzinfar
+/tests/smoke/                           @Mahdiar-Farzinfar
+/tests/cross-platform/                  @Mahdiar-Farzinfar
+
+# ------------------------------------------------------------------------------
+# Modules root
+# ------------------------------------------------------------------------------
+/modules/                               @Mahdiar-Farzinfar
+/modules/README.md                      @Mahdiar-Farzinfar
+
+# ------------------------------------------------------------------------------
+# All individual modules (security-critical + foundation)
+# ------------------------------------------------------------------------------
+/modules/backend-bootstrap/             @Mahdiar-Farzinfar
+/modules/backend-bootstrap/**/tests/    @Mahdiar-Farzinfar
+/modules/backend-bootstrap/**/examples/ @Mahdiar-Farzinfar
+
+/modules/github-oidc/                   @Mahdiar-Farzinfar
+/modules/github-oidc/**/tests/          @Mahdiar-Farzinfar
+/modules/github-oidc/**/examples/       @Mahdiar-Farzinfar
+
+/modules/kms/                           @Mahdiar-Farzinfar
+/modules/kms/**/tests/                  @Mahdiar-Farzinfar
+/modules/kms/**/examples/               @Mahdiar-Farzinfar
+
+/modules/log-archive-bucket/            @Mahdiar-Farzinfar
+/modules/log-archive-bucket/**/tests/   @Mahdiar-Farzinfar
+/modules/log-archive-bucket/**/examples/ @Mahdiar-Farzinfar
+
+/modules/cloudtrail/                    @Mahdiar-Farzinfar
+/modules/cloudtrail/**/tests/           @Mahdiar-Farzinfar
+/modules/cloudtrail/**/examples/        @Mahdiar-Farzinfar
+
+/modules/guardduty/                     @Mahdiar-Farzinfar
+/modules/guardduty/**/tests/            @Mahdiar-Farzinfar
+/modules/guardduty/**/examples/         @Mahdiar-Farzinfar
+
+/modules/scp/                           @Mahdiar-Farzinfar
+/modules/scp/**/tests/                  @Mahdiar-Farzinfar
+/modules/scp/**/examples/               @Mahdiar-Farzinfar
