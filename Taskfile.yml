@@ -369,7 +369,7 @@ tasks:
     desc: Lint Markdown files
     deps: [preflight]
     cmds:
-      - markdownlint-cli2 "**/*.md" "#node_modules"
+      - markdownlint-cli2 --config "./tooling/.markdownlint-cli2.yaml" "**/*.md" "#node_modules"
 
   lint:actions:
     desc: Lint GitHub Actions workflows
