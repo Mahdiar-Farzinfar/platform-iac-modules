@@ -1,0 +1,140 @@
+# =============================================================================
+# terraform-docs — Enterprise Configuration
+# Repository : platform-iac-modules
+# Spec       : https://terraform-docs.io/user-guide/configuration/
+# =============================================================================
+#
+# Purpose
+#   Single source of truth for module README generation across the monorepo.
+#   Keeps docs consistent, reviewable, and CI/pre-commit friendly.
+#
+# Recommended usage (per module — preferred in CI / pre-commit)
+#   terraform-docs -c .terraform-docs.yml modules/<module-name>
+#
+# Bulk generation (POSIX)
+#   for d in modules/*/; do
+#     terraform-docs -c .terraform-docs.yml "$d"
+#   done
+#
+# Bulk generation (PowerShell)
+#   Get-ChildItem modules -Directory | ForEach-Object {
+#     terraform-docs -c .terraform-docs.yml $_.FullName
+#   }
+#
+# Optional recursive run from repo root (see recursive block notes)
+#   terraform-docs -c .terraform-docs.yml .
+#
+# README contract
+#   Each module README.md MUST contain:
+#     <!-- BEGIN_TF_DOCS -->
+#     <!-- END_TF_DOCS -->
+#   Custom narrative stays outside these markers; generated content is injected.
+#
+# Header convention (main.tf)
+#   /**
+#    * # Module Name
+#    *
+#    * Short enterprise description of purpose, scope, and non-goals.
+#    */
+# =============================================================================
+
+formatter: "markdown table"
+
+version: ""
+
+# -----------------------------------------------------------------------------
+# Header / footer sources
+# -----------------------------------------------------------------------------
+# Documentation content sources.
+# header-from reads leading comments from main.tf.
+# footer-from can point to a shared footer/disclaimer file.
+header-from: "main.tf"
+footer-from: ""
+
+# -----------------------------------------------------------------------------
+# Recursive discovery
+# -----------------------------------------------------------------------------
+# Recursive discovery is intentionally disabled.
+# Example directories contain Terraform files that should not receive
+# automatic README injection. Generate docs explicitly per module path.
+recursive:
+  enabled: false
+  path: modules
+  include-main: false
+
+# -----------------------------------------------------------------------------
+# Sections
+# -----------------------------------------------------------------------------
+# Explicit allow-list keeps output stable and reviewable in PRs.
+sections:
+  hide: []
+  show:
+    - header
+    - requirements
+    - providers
+    - modules
+    - resources
+    - inputs
+    - outputs
+    - footer
+
+# Deterministic section order for every module README.
+content: |-
+  {{ .Header }}
+
+  {{ .Requirements }}
+
+  {{ .Providers }}
+
+  {{ .Modules }}
+
+  {{ .Resources }}
+
+  {{ .Inputs }}
+
+  {{ .Outputs }}
+
+  {{ .Footer }}
+
+# -----------------------------------------------------------------------------
+# Output
+# -----------------------------------------------------------------------------
+# Preserve hand-written content outside the TF_DOCS markers.
+# Use "replace" only when the entire file is generated.
+output:
+  file: "README.md"
+  mode: inject
+  template: |-
+    <!-- BEGIN_TF_DOCS -->
+    {{ .Content }}
+    <!-- END_TF_DOCS -->
+
+# Enable only when publishing example values is intentional.
+output-values:
+  enabled: false
+  from: ""
+
+# -----------------------------------------------------------------------------
+# Sorting
+# -----------------------------------------------------------------------------
+sort:
+  enabled: true
+  by: required # supported: required, name, type
+
+# -----------------------------------------------------------------------------
+# Settings
+# -----------------------------------------------------------------------------
+settings:
+  anchor: true
+  color: true
+  default: true
+  description: false
+  escape: true
+  hide-empty: true
+  html: true
+  indent: 2
+  lockfile: true
+  read-comments: true
+  required: true
+  sensitive: true
+  type: true
