@@ -777,7 +777,7 @@ jobs:
         with:
           results_file: scorecard-results.sarif
           results_format: sarif
-          publish_results: ${{ github.event_name != 'pull_request' }}
+          publish_results: true
 
       - name: Upload Scorecard SARIF artifact
         if: always() && hashFiles('scorecard-results.sarif') != ''
