@@ -377,7 +377,7 @@ jobs:
       - prepare
     if: needs.prepare.outputs.has_releases == 'true'
     permissions:
-      contents: write
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -389,6 +389,15 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: false
+
+      - name: Generate release GitHub App token
+        id: release-app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  #3.2.0
+        with:
+          client-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
 
       - name: Refresh remote tags
         run: |
@@ -413,12 +422,13 @@ jobs:
 
       - name: Create annotated tag
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.release-app-token.outputs.token }}
+          RELEASE_APP_SLUG: ${{ steps.release-app-token.outputs.app-slug }}
         run: |
           set -euo pipefail
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "${RELEASE_APP_SLUG}[bot]"
+          git config user.email "${RELEASE_APP_SLUG}[bot]@users.noreply.github.com"
 
           git tag -a "${{ matrix.release.next_tag }}" -m "${{ matrix.release.domain }} ${{ matrix.release.next_version }}"
           git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "refs/tags/${{ matrix.release.next_tag }}"
@@ -426,13 +436,14 @@ jobs:
       - name: Create GitHub release
         if: matrix.release.kind != 'image'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.release-app-token.outputs.token }}
         run: |
           set -euo pipefail
 
           title="${{ matrix.release.domain }} v${{ matrix.release.next_version }}"
 
           gh release create "${{ matrix.release.next_tag }}" \
+            --repo "${GITHUB_REPOSITORY}" \
             --title "${title}" \
             --notes-file release-notes.md
 
