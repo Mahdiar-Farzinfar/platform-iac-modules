@@ -407,16 +407,6 @@ jobs:
           set -euo pipefail
           git fetch --force --tags origin
 
-      - name: Guard against existing tag
-        run: |
-          set -euo pipefail
-
-          tag_ref="refs/tags/${{ matrix.release.next_tag }}"
-          if git show-ref --tags --verify --quiet "${tag_ref}"; then
-            echo "Tag already exists: ${{ matrix.release.next_tag }}"
-            exit 1
-          fi
-
       - name: Render release notes
         if: matrix.release.kind != 'image'
         run: |
@@ -431,6 +421,11 @@ jobs:
           APP_SLUG: ${{ steps.release-app-token.outputs.app-slug }}
         run: |
           set -euo pipefail
+
+          if gh api --silent "repos/${GITHUB_REPOSITORY}/git/refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "Tag already exists: ${TAG}"
+            exit 1
+          fi
 
           tagger_name="${APP_SLUG}[bot]"
           tagger_email="${APP_SLUG}[bot]@users.noreply.github.com"
