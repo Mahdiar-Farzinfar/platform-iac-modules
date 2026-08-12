@@ -455,9 +455,19 @@ jobs:
               --jq .sha
           )"
 
-          if ! gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+          if ! output=$(gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
             -f ref="refs/tags/${TAG}" \
-            -f sha="${tag_object_sha}" 2>/dev/null; then
+            -f sha="${tag_object_sha}" 2>&1); then
+            if gh api --silent "${tag_ref_api}" >/dev/null 2>&1; then
+              echo "Tag was created by another job or in a race: ${TAG}"
+              exit 0
+            fi
+
+            echo "Failed to create tag reference: ${TAG}" >&2
+            echo "API response:" >&2
+            echo "$output" >&2
+            exit 1
+          fi
 
             if gh api --silent "${tag_ref_api}" >/dev/null 2>&1; then
               echo "Tag was created by another job or in a race: ${TAG}"
