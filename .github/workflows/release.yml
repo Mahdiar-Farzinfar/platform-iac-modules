@@ -422,9 +422,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          if gh api --silent "repos/${GITHUB_REPOSITORY}/git/refs/tags/${TAG}" >/dev/null 2>&1; then
+          if gh api --silent "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" >/dev/null 2>&1; then
             echo "Tag already exists: ${TAG}"
-            exit 1
+            exit 0
           fi
 
           tagger_name="${APP_SLUG}[bot]"
@@ -454,9 +454,18 @@ jobs:
               --jq .sha
           )"
 
-          gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
-            -f ref="refs/tags/${TAG}" \
-            -f sha="${tag_object_sha}"
+          if ! gh api --method POST "repos/${GITHUB_REPOSITORY}/git/ref" \
+            -f ref="ref/tags/${TAG}" \
+            -f sha="${tag_object_sha}" 2>/dev/null; then
+
+            if gh api --silent "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" >/dev/null 2>&1; then
+              echo "Tag was created by another job or in a race: ${TAG}"
+              exit 0
+            fi
+
+            echo "Failed to create tag reference: ${TAG}" >&2
+            exit 1
+          fi
 
           echo "Created annotated tag ${TAG} (object=${tag_object_sha}, commit=${GITHUB_SHA})"
 
