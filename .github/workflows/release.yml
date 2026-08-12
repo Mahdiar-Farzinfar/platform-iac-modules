@@ -422,7 +422,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          if gh api --silent "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" >/dev/null 2>&1; then
+          tag_ref_api="repos/${GITHUB_REPOSITORY}/git/ref/tags/$(printf '%s' "${TAG}" | jq -sRr @uri)"
+          if gh api --silent "${tag_ref_api}" >/dev/null 2>&1; then
             echo "Tag already exists: ${TAG}"
             exit 0
           fi
@@ -454,11 +455,11 @@ jobs:
               --jq .sha
           )"
 
-          if ! gh api --method POST "repos/${GITHUB_REPOSITORY}/git/ref" \
-            -f ref="ref/tags/${TAG}" \
+          if ! gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+            -f ref="refs/tags/${TAG}" \
             -f sha="${tag_object_sha}" 2>/dev/null; then
 
-            if gh api --silent "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" >/dev/null 2>&1; then
+            if gh api --silent "${tag_ref_api}" >/dev/null 2>&1; then
               echo "Tag was created by another job or in a race: ${TAG}"
               exit 0
             fi
