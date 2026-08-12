@@ -404,6 +404,8 @@ jobs:
           permission-metadata: read
 
       - name: Refresh remote tags
+        env:
+          APP_SLUG: ${{ steps.release-app-token.outputs.app-slug }}
         run: |
           set -euo pipefail
           git fetch --force --tags origin
