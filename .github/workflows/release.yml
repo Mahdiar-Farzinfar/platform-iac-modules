@@ -515,27 +515,6 @@ jobs:
             exit 0
           fi
 
-              --arg sha "${tag_object_sha}" \
-              '{ ref: $ref, sha: $sha }'
-          )"
-
-          echo "Create ref payload:"
-          echo "${ref_payload}" | jq .
-
-          set +e
-          ref_response="$(
-            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
-              --input - <<< "${ref_payload}" 2>&1
-          )"
-          ref_exit=$?
-          set -e
-
-          if [[ "${ref_exit}" -eq 0 ]]; then
-            echo "Created tag reference: ${TAG}"
-            echo "${ref_response}" | jq '{ref, object, node_id, url}' || echo "${ref_response}"
-            exit 0
-          fi
-
           if race_ref="$(gh api "${tag_ref_api}" 2>/dev/null)"; then
             echo "Tag was created by another job or in a race: ${TAG}"
             echo "${race_ref}" | jq '{ref, object, node_id, url}' || echo "${race_ref}"
