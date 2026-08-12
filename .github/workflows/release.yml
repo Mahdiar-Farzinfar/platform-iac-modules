@@ -284,7 +284,7 @@ jobs:
             if [[ -n "${last_tag}" ]]; then
               range="${last_tag}..HEAD"
             else
-              range="${root_commit}..HEAD"
+            range="${root_commit}..HEAD"
             fi
 
             tmp_log="$(mktemp)"
@@ -303,7 +303,7 @@ jobs:
               echo "## ${domain} v${next_version}"
               echo
               echo "### Changed"
-              cat "${tmp_log}"
+              cat "${tmp_log}" || echo "- No user-facing changes." >> "${tmp_notes}"
               echo
             } > "${tmp_notes}"
 
@@ -399,6 +399,7 @@ jobs:
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
           permission-contents: write
+          permission-administration: write
           permission-workflows: write
           permission-metadata: read
 
@@ -406,6 +407,8 @@ jobs:
         run: |
           set -euo pipefail
           git fetch --force --tags origin
+          git config --global user.name "${APP_SLUG}[bot]"
+          git config --global user.email "${APP_SLUG}[bot]@users.noreply.github.com"
 
       - name: Render release notes
         if: matrix.release.kind != 'image'
@@ -491,9 +494,9 @@ jobs:
           ref_payload="$(
             jq -n \
               --arg ref "${tag_ref}" \
-              --arg sha "${tag_object_sha}" \
-              '{ ref: $ref, sha: $sha }'
-          )"
+                --arg sha "${tag_object_sha}" \
+                '{ ref: $ref, sha: $sha }'
+            )"
 
           echo "Create ref payload:"
           echo "${ref_payload}" | jq .
@@ -501,7 +504,7 @@ jobs:
           set +e
           ref_response="$(
             gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
-              --input - <<< "${ref_payload}" 2>&1
+              --input - <<< "${ref_payload}" 2>&1 || true
           )"
           ref_exit=$?
           set -e
@@ -702,6 +705,7 @@ jobs:
             exit 0
           fi
 
+          echo "Rendering changelog sections..." >&2
           tmp_sections="$(mktemp)"
           jq -c '.[]' <<< "${filtered}" | while read -r item; do
             notes_b64="$(jq -r '.notes_b64' <<< "${item}")"
@@ -733,6 +737,7 @@ jobs:
           import os
           from pathlib import Path
 
+          import sys
           sections = Path(os.environ["SECTIONS_FILE"]).read_text().strip()
           changelog_path = Path("CHANGELOG.md")
           current = changelog_path.read_text()
