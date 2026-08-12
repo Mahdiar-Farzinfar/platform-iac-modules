@@ -57,7 +57,7 @@ jobs:
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             base_commit="$(git rev-list --max-count=1 HEAD^ 2>/dev/null || true)"
             if [[ -z "${base_commit}" ]]; then
-              base_commit="$(git rev-list --max-parents=0 HEAD || true)"
+              base_commit="$(git rev-list --max-parents=0 HEAD)"
             fi
             echo "commit_range=${base_commit}..${GITHUB_SHA}" >> "${GITHUB_OUTPUT}"
             exit 0
@@ -69,7 +69,7 @@ jobs:
           fi
           if [[ -z "${before}" ]]; then
             before="$(git rev-list --max-parents=0 HEAD)"
-          fi || true
+          fi
 
           echo "commit_range=${before}..${GITHUB_SHA}" >> "${GITHUB_OUTPUT}"
 
@@ -86,7 +86,7 @@ jobs:
           if [[ ${#changed_files[@]} -eq 0 ]]; then
             echo 'domains=[]' >> "${GITHUB_OUTPUT}"
             echo 'has_domains=false' >> "${GITHUB_OUTPUT}"
-            exit 0 || true
+            exit 0
           fi
 
           declare -A domains=()
@@ -106,7 +106,7 @@ jobs:
               .github/*|docs/*|scripts/*|tooling/*|catalog/*|tests/*|README.md|SECURITY.md|CONTRIBUTING.md|CODE_OF_CONDUCT.md|CHANGELOG.md|LICENSE|go.mod|go.sum|.gitignore|.editorconfig|.pre-commit-config.yaml|.terraform-docs.yml|Taskfile.yml|justfile|Makefile)
                 domains["root"]=1
                 ;;
-            esac || true
+            esac
           done
 
           if [[ ${#domains[@]} -eq 0 ]]; then
@@ -132,7 +132,7 @@ jobs:
                   elif startswith("module/") then
                     {
                       domain: .,
-                      kind: "module" // "module",
+                      kind: "module",
                       name: (split("/")[1]),
                       path: ("modules/" + (split("/")[1])),
                       tag_prefix: (. + "/v")
@@ -140,7 +140,7 @@ jobs:
                   elif startswith("image/") then
                     {
                       domain: .,
-                      kind: "image" // "image",
+                      kind: "image",
                       name: (split("/")[1]),
                       path: ".devcontainer",
                       tag_prefix: (. + "/v")
@@ -284,7 +284,7 @@ jobs:
             if [[ -n "${last_tag}" ]]; then
               range="${last_tag}..HEAD"
             else
-            range="${root_commit}..HEAD || true"
+            range="${root_commit}..HEAD"
             fi
 
             tmp_log="$(mktemp)"
@@ -292,7 +292,7 @@ jobs:
               git log --format='- %s (%h)' "${range}" -- . > "${tmp_log}" || true
             else
               git log --format='- %s (%h)' "${range}" -- "${path}" > "${tmp_log}" || true
-            fi || true
+            fi
 
             if [[ ! -s "${tmp_log}" ]]; then
               echo "- No user-facing changes." > "${tmp_log}"
@@ -340,7 +340,7 @@ jobs:
 
             jq --argjson obj "${release_obj}" '. += [$obj]' "${tmp_releases}" > "${tmp_releases}.next"
             mv "${tmp_releases}.next" "${tmp_releases}"
-          done < <(jq -c '.[]' "${tmp_domains}" || true)
+          done < <(jq -c '.[]' "${tmp_domains}")
 
           releases="$(jq -c '.' "${tmp_releases}")"
           {
@@ -474,7 +474,7 @@ jobs:
           set +e
           tag_object_response="$(
             gh api --method POST "repos/${GITHUB_REPOSITORY}/git/tags" \
-              --input - <<< "${tag_payload}" 2>&1 || true
+              --input - <<< "${tag_payload}" 2>&1
           )"
           tag_object_exit=$?
           set -e
@@ -483,7 +483,7 @@ jobs:
             echo "::error::Failed to create git tag object for ${TAG}"
             echo "Exit code: ${tag_object_exit}" >&2
             echo "API response:" >&2
-            echo "${tag_object_response}" >&2 || true
+            echo "${tag_object_response}" >&2
             exit 1
           fi
 
@@ -525,7 +525,7 @@ jobs:
           set +e
           ref_response="$(
             gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
-              --input - <<< "${ref_payload}" 2>&1 || true
+              --input - <<< "${ref_payload}" 2>&1
           )"
           ref_exit=$?
           set -e
@@ -609,7 +609,7 @@ jobs:
           parent="${TAG}"
           conflict_found=false
           while [[ "${parent}" == */* ]]; do
-            parent="${parent%/*}" || true
+            parent="${parent%/*}"
             parent_api="repos/${GITHUB_REPOSITORY}/git/ref/tags/$(uri_encode "${parent}")"
             if parent_ref="$(gh api "${parent_api}" 2>/dev/null)"; then
               conflict_found=true
@@ -631,7 +631,7 @@ jobs:
               jq -c --arg exact "${tag_ref}" '
                 [ .[]
                   | select(.ref != $exact)
-                  | select(.ref | startswith($exact + "/")) // empty
+                  | select(.ref | startswith($exact + "/"))
                 ]
               ' <<< "${children}"
             )"
@@ -641,7 +641,7 @@ jobs:
               jq -r '.[].ref' <<< "${descendants}" >&2
             else
               echo "No descendant tag refs under ${tag_ref}." >&2
-            fi || true
+            fi
           else
             echo "Unable to query matching-refs for tags/${TAG}." >&2
           fi
@@ -693,7 +693,7 @@ jobs:
           gh release create "${{ matrix.release.next_tag }}" \
             --repo "${GITHUB_REPOSITORY}" \
             --title "${title}" \
-            --notes-file release-notes.md || true
+            --notes-file release-notes.md
 
   changelog:
     name: Update changelog
@@ -737,7 +737,7 @@ jobs:
           echo "file=${tmp_sections}" >> "${GITHUB_OUTPUT}"
 
       - name: Update CHANGELOG.md
-        if: steps.sections.outputs.file != '' || true
+        if: steps.sections.outputs.file != ''
         env:
           BRANCH_NAME: automation/changelog-${{ github.run_id }}
           SECTIONS_FILE: ${{ steps.sections.outputs.file }}
@@ -775,7 +775,7 @@ jobs:
               rest = current[idx:].lstrip("\n")
 
           new_text = intro + sections + "\n\n" + rest
-          changelog_path.write_text(new_text) || true
+          changelog_path.write_text(new_text)
           PY
 
           git config user.name "github-actions[bot]"
@@ -823,7 +823,7 @@ jobs:
           gh pr create \
             --base "${DEFAULT_BRANCH}" \
             --head "${BRANCH_NAME}" \
-            --title "${pr_title}" || true \
+            --title "${pr_title}" \
             --body-file "${pr_body_file}"
 
   all-checks:
