@@ -422,8 +422,24 @@ jobs:
         run: |
           set -euo pipefail
 
-          tag_ref_api="repos/${GITHUB_REPOSITORY}/git/ref/tags/$(printf '%s' "${TAG}" | jq -sRr @uri)"
-          if gh api --silent "${tag_ref_api}" >/dev/null 2>&1; then
+          uri_encode() {
+            printf '%s' "$1" | jq -sRr @uri
+          }
+
+          tag_ref="refs/tags/${TAG}"
+          tag_ref_api="repos/${GITHUB_REPOSITORY}/git/ref/tags/$(uri_encode "${TAG}")"
+          matching_refs_api="repos/${GITHUB_REPOSITORY}/git/matching-refs/tags/$(uri_encode "${TAG}")"
+
+          echo "Creating annotated tag"
+          echo "  repository : ${GITHUB_REPOSITORY}"
+          echo "  tag        : ${TAG}"
+          echo "  ref        : ${tag_ref}"
+          echo "  commit     : ${GITHUB_SHA}"
+          echo "  tagger     : ${APP_SLUG}[bot]"
+
+          if existing_ref="$(gh api "${tag_ref_api}" 2>/dev/null)"; then
+            echo "Tag already exists: ${TAG}"
+            echo "${existing_ref}" | jq '{ref, object, node_id, url}' || echo "${existing_ref}"
             echo "Tag already exists: ${TAG}"
             exit 0
           fi
@@ -449,25 +465,197 @@ jobs:
               }'
           )"
 
-          tag_object_sha="$(
+          echo "Tag object payload:"
+          echo "${tag_payload}" | jq .
+
+          set +e
+          tag_object_response="$(
             gh api --method POST "repos/${GITHUB_REPOSITORY}/git/tags" \
-              --input - <<< "${tag_payload}" \
-              --jq .sha
+              --input - <<< "${tag_payload}" 2>&1
           )"
+          tag_object_exit=$?
+          set -e
 
-          if ! output=$(gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
-            -f ref="refs/tags/${TAG}" \
-            -f sha="${tag_object_sha}" 2>&1); then
-            if gh api --silent "${tag_ref_api}" >/dev/null 2>&1; then
-              echo "Tag was created by another job or in a race: ${TAG}"
-              exit 0
-            fi
-
-            echo "Failed to create tag reference: ${TAG}" >&2
+          if [[ "${tag_object_exit}" -ne 0 ]]; then
+            echo "::error::Failed to create git tag object for ${TAG}"
+            echo "Exit code: ${tag_object_exit}" >&2
             echo "API response:" >&2
-            echo "$output" >&2
+            echo "${tag_object_response}" >&2
             exit 1
           fi
+
+          tag_object_sha="$(jq -er '.sha' <<< "${tag_object_response}")"
+          echo "Created tag object: ${tag_object_sha}"
+          echo "${tag_object_response}" | jq '{sha, tag, message, type: .object.type, object: .object.sha, tagger, verification}'
+
+          ref_payload="$(
+            jq -n \
+              --arg ref "${tag_ref}" \
+              --arg sha "${tag_object_sha}" \
+              '{ ref: $ref, sha: $sha }'
+          )"
+
+          echo "Create ref payload:"
+          echo "${ref_payload}" | jq .
+
+          set +e
+          ref_response="$(
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              --input - <<< "${ref_payload}" 2>&1
+          )"
+          ref_exit=$?
+          set -e
+
+          if [[ "${ref_exit}" -eq 0 ]]; then
+            echo "Created tag reference: ${TAG}"
+            echo "${ref_response}" | jq '{ref, object, node_id, url}' || echo "${ref_response}"
+            exit 0
+          fi
+
+          if race_ref="$(gh api "${tag_ref_api}" 2>/dev/null)"; then
+            echo "Tag was created by another job or in a race: ${TAG}"
+            echo "${race_ref}" | jq '{ref, object, node_id, url}' || echo "${race_ref}"
+            exit 0
+          fi
+
+          echo "::error::Failed to create tag reference: ${TAG}"
+          echo "======= TAG REF CREATION FAILURE DIAGNOSTICS =======" >&2
+          echo "repository      : ${GITHUB_REPOSITORY}" >&2
+          echo "tag             : ${TAG}" >&2
+          echo "ref             : ${tag_ref}" >&2
+          echo "tag_object_sha  : ${tag_object_sha}" >&2
+          echo "commit_sha      : ${GITHUB_SHA}" >&2
+          echo "tagger          : ${tagger_name} <${tagger_email}>" >&2
+          echo "gh_exit_code    : ${ref_exit}" >&2
+          echo >&2
+
+          echo "--- Raw create-ref API response ---" >&2
+          echo "${ref_response}" >&2
+          echo >&2
+
+          echo "--- Parsed error fields (if JSON) ---" >&2
+          if jq -e . >/dev/null 2>&1 <<< "${ref_response}"; then
+            jq '{
+              message,
+              documentation_url,
+              status,
+              errors,
+              error
+            }' <<< "${ref_response}" >&2 || true
+          else
+            echo "Response was not pure JSON (gh may have mixed stderr/stdout)." >&2
+          fi
+          echo >&2
+
+          echo "--- Tag object re-fetch ---" >&2
+          if tag_obj="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${tag_object_sha}" 2>&1)"; then
+            jq '{sha, tag, message, object, tagger, verification}' <<< "${tag_obj}" >&2 || echo "${tag_obj}" >&2
+          else
+            echo "Unable to re-fetch tag object:" >&2
+            echo "${tag_obj}" >&2
+          fi
+          echo >&2
+
+          echo "--- Commit object check ---" >&2
+          if commit_obj="$(gh api "repos/${GITHUB_REPOSITORY}/git/commits/${GITHUB_SHA}" 2>&1)"; then
+            jq '{
+              sha,
+              message: (.commit.message // .message // "" | split("\n")[0]),
+              author: (.commit.author // .author // null),
+              parents: [(.parents // [])[].sha]
+            }' <<< "${commit_obj}" >&2 || echo "${commit_obj}" >&2
+          else
+            echo "Unable to fetch commit ${GITHUB_SHA}:" >&2
+            echo "${commit_obj}" >&2
+          fi
+          echo >&2
+
+          echo "--- Exact ref existence ---" >&2
+          if exact_ref="$(gh api "${tag_ref_api}" 2>&1)"; then
+            echo "Exact ref unexpectedly exists:" >&2
+            echo "${exact_ref}" >&2
+          else
+            echo "Exact ref not found (expected on failure path):" >&2
+            echo "${exact_ref}" >&2
+          fi
+          echo >&2
+
+          echo "--- Ref namespace conflicts (parent tags) ---" >&2
+          # Git cannot have both refs/tags/foo and refs/tags/foo/bar.
+          parent="${TAG}"
+          conflict_found=false
+          while [[ "${parent}" == */* ]]; do
+            parent="${parent%/*}"
+            parent_api="repos/${GITHUB_REPOSITORY}/git/ref/tags/$(uri_encode "${parent}")"
+            if parent_ref="$(gh api "${parent_api}" 2>/dev/null)"; then
+              conflict_found=true
+              echo "CONFLICT: parent tag blocks nested tag '${TAG}': refs/tags/${parent}" >&2
+              jq '{ref, object}' <<< "${parent_ref}" >&2 || echo "${parent_ref}" >&2
+            else
+              echo "No parent tag at refs/tags/${parent}" >&2
+            fi
+          done
+          if [[ "${conflict_found}" != "true" ]]; then
+            echo "No parent-tag namespace conflict detected." >&2
+          fi
+          echo >&2
+
+          echo "--- Ref namespace conflicts (child tags under this path) ---" >&2
+          if children="$(gh api "${matching_refs_api}" 2>/dev/null)"; then
+            # matching-refs may include the exact ref; filter descendants only.
+            descendants="$(
+              jq -c --arg exact "${tag_ref}" '
+                [ .[]
+                  | select(.ref != $exact)
+                  | select(.ref | startswith($exact + "/"))
+                ]
+              ' <<< "${children}"
+            )"
+            desc_count="$(jq 'length' <<< "${descendants}")"
+            if [[ "${desc_count}" -gt 0 ]]; then
+              echo "CONFLICT: descendant refs exist under ${tag_ref} (path used as directory):" >&2
+              jq -r '.[].ref' <<< "${descendants}" >&2
+            else
+              echo "No descendant tag refs under ${tag_ref}." >&2
+            fi
+          else
+            echo "Unable to query matching-refs for tags/${TAG}." >&2
+          fi
+          echo >&2
+
+          echo "--- Token identity / permissions probe ---" >&2
+          if ident="$(gh api user 2>/dev/null)"; then
+            jq '{login, id, type, node_id}' <<< "${ident}" >&2 || echo "${ident}" >&2
+          elif app_ident="$(gh api /app 2>/dev/null)"; then
+            jq '{slug, name, id, node_id}' <<< "${app_ident}" >&2 || echo "${app_ident}" >&2
+          else
+            echo "Unable to resolve token identity via /user or /app." >&2
+          fi
+
+          if perms="$(gh api "repos/${GITHUB_REPOSITORY}" --jq '{
+            name: .full_name,
+            visibility: .visibility,
+            permissions: .permissions,
+            allow_auto_merge: .allow_auto_merge
+          }' 2>&1)"; then
+            echo "Repository permission view for this token:" >&2
+            echo "${perms}" >&2
+          else
+            echo "Unable to query repository permissions:" >&2
+            echo "${perms}" >&2
+          fi
+          echo >&2
+
+          echo "--- Common causes for HTTP 422 'Reference update failed' ---" >&2
+          cat >&2 <<'EOF'
+          1) Ruleset / tag protection blocked creation (most common with Apps)
+          2) Ref namespace conflict (tag "root" vs "root/v0.1.0")
+          3) Token lacks effective contents:write on this ref
+          4) Race lost but exact ref still unreadable (replication/permission)
+          5) Invalid object SHA type for this ref create
+          EOF
+          echo "======= END DIAGNOSTICS =======" >&2
+          exit 1
 
       - name: Create GitHub release
         if: matrix.release.kind != 'image'
