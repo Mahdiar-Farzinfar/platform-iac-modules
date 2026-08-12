@@ -399,6 +399,7 @@ jobs:
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
           permission-contents: write
+          permission-administration: write
           permission-workflows: write
           permission-metadata: read
 
@@ -406,6 +407,8 @@ jobs:
         run: |
           set -euo pipefail
           git fetch --force --tags origin
+          git config --global user.name "${APP_SLUG}[bot]"
+          git config --global user.email "${APP_SLUG}[bot]@users.noreply.github.com"
 
       - name: Render release notes
         if: matrix.release.kind != 'image'
@@ -459,7 +462,7 @@ jobs:
               '{
                 tag: $tag,
                 message: $message,
-              object: $object // "${GITHUB_SHA}",
+                object: $object,
                 type: "commit",
                 tagger: { name: $name, email: $email, date: $date }
               }'
@@ -491,6 +494,27 @@ jobs:
           ref_payload="$(
             jq -n \
               --arg ref "${tag_ref}" \
+                --arg sha "${tag_object_sha}" \
+                '{ ref: $ref, sha: $sha }'
+            )"
+
+          echo "Create ref payload:"
+          echo "${ref_payload}" | jq .
+
+          set +e
+          ref_response="$(
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              --input - <<< "${ref_payload}" 2>&1 || true
+          )"
+          ref_exit=$?
+          set -e
+
+          if [[ "${ref_exit}" -eq 0 ]]; then
+            echo "Created tag reference: ${TAG}"
+            echo "${ref_response}" | jq '{ref, object, node_id, url}' || echo "${ref_response}"
+            exit 0
+          fi
+
               --arg sha "${tag_object_sha}" \
               '{ ref: $ref, sha: $sha }'
           )"
