@@ -427,6 +427,7 @@ jobs:
         run: |
           set -euo pipefail
 
+          tmpdir="$(mktemp -d)"
           uri_encode() {
             printf '%s' "$1" | jq -sRr @uri
           }
@@ -476,7 +477,7 @@ jobs:
           set +e
           tag_object_response="$(
             gh api --method POST "repos/${GITHUB_REPOSITORY}/git/tags" \
-              --input - <<< "${tag_payload}" 2>&1
+              --input - <<< "${tag_payload}" 2>"${tmpdir}/create-tag.stderr"
           )"
           tag_object_exit=$?
           set -e
@@ -485,7 +486,7 @@ jobs:
             echo "::error::Failed to create git tag object for ${TAG}"
             echo "Exit code: ${tag_object_exit}" >&2
             echo "API response:" >&2
-            echo "${tag_object_response}" >&2
+            cat "${tmpdir}/create-tag.stderr" >&2
             exit 1
           fi
 
@@ -506,7 +507,7 @@ jobs:
           set +e
           ref_response="$(
             gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
-              --input - <<< "${ref_payload}" 2>&1
+              --input - <<< "${ref_payload}" 2>"${tmpdir}/create-ref.stderr"
           )"
           ref_exit=$?
           set -e
@@ -518,12 +519,18 @@ jobs:
             echo "Tag was created concurrently: ${TAG}"
             echo "${race_ref}" | jq '{ref, object, node_id, url}' || echo "${race_ref}"
           else
-            echo "::error::Failed to create tag reference: ${TAG}"
-            echo "${ref_response}" >&2
-            exit 1
+            echo "::error::Failed to create tag reference: ${TAG}" >&2
           fi
 
-          verified_ref="$(gh api "${tag_ref_api}")"
+          if verified_ref="$(gh api "${tag_ref_api}" 2>"${tmpdir}/verify-ref.stderr")"; then
+            :
+          else
+            echo "::error::Unable to verify tag reference after create: ${TAG}" >&2
+            cat "${tmpdir}/verify-ref.stderr" >&2 || true
+            verified_ref=''
+          fi
+
+          if [[ -n "${verified_ref}" ]]; then
           verified_object_sha="$(jq -er '.object.sha' <<< "${verified_ref}")"
           verified_object_type="$(jq -er '.object.type' <<< "${verified_ref}")"
 
@@ -539,6 +546,9 @@ jobs:
           fi
 
           echo "Verified tag reference: ${TAG}"
+            rm -rf "${tmpdir}"
+            exit 0
+          fi
           echo "::error::Failed to create tag reference: ${TAG}"
           echo "======= TAG REF CREATION FAILURE DIAGNOSTICS =======" >&2
           echo "repository      : ${GITHUB_REPOSITORY}" >&2
@@ -551,11 +561,16 @@ jobs:
           echo >&2
 
           echo "--- Raw create-ref API response ---" >&2
-          echo "${ref_response}" >&2
+          if [[ -n "${ref_response}" ]]; then
+            echo "${ref_response}" >&2
+          fi
+          if [[ -s "${tmpdir}/create-ref.stderr" ]]; then
+            cat "${tmpdir}/create-ref.stderr" >&2
+          fi
           echo >&2
 
           echo "--- Parsed error fields (if JSON) ---" >&2
-          if jq -e . >/dev/null 2>&1 <<< "${ref_response}"; then
+          if [[ -n "${ref_response}" ]] && jq -e . >/dev/null 2>&1 <<< "${ref_response}"; then
             jq '{
               message,
               documentation_url,
@@ -675,6 +690,7 @@ jobs:
           4) Race lost but exact ref still unreadable (replication/permission)
           5) Invalid object SHA type for this ref create
           EOF
+          rm -rf "${tmpdir}"
           echo "======= END DIAGNOSTICS =======" >&2
           exit 1
 
