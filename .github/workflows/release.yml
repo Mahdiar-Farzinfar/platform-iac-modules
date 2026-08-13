@@ -7,7 +7,8 @@ on:
       - main
   workflow_dispatch: {}
 
-permissions: {}
+permissions:
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
@@ -26,8 +27,6 @@ jobs:
     name: Discover release domains
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    permissions:
-      contents: read
     outputs:
       domains: ${{ steps.discover.outputs.domains }}
       has_domains: ${{ steps.discover.outputs.has_domains }}
@@ -162,8 +161,6 @@ jobs:
     timeout-minutes: 10
     needs: discover
     if: needs.discover.outputs.has_domains == 'true'
-    permissions:
-      contents: read
     outputs:
       releases: ${{ steps.prepare.outputs.releases }}
       has_releases: ${{ steps.prepare.outputs.has_releases }}
@@ -378,6 +375,7 @@ jobs:
     if: needs.prepare.outputs.has_releases == 'true'
     permissions:
       contents: write
+      packages: write
     env:
       GH_TOKEN: ${{ github.token }}
     strategy:
