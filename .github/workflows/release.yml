@@ -393,26 +393,15 @@ jobs:
           fetch-tags: true
           persist-credentials: true
 
-      - name: Generate release GitHub App token
-        id: release-app-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  #v3.2.0
-        with:
-          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
-          permission-contents: write
-          permission-administration: write
-          permission-workflows: write
-          permission-metadata: read
-
       - name: Refresh remote tags
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          git config --global user.name "${{ steps.release-app-token.outputs.app-slug }}[bot]"
-          git config --global user.email "${{ steps.release-app-token.outputs.app-slug }}[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git remote set-url origin "https://x-access-token:${{ steps.release-app-token.outputs.token }}@github.com/${{ github.repository }}.git"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
           git fetch --force --tags origin
 
       - name: Render release notes
@@ -423,10 +412,10 @@ jobs:
 
       - name: Create annotated tag
         env:
-          GH_TOKEN: ${{ steps.release-app-token.outputs.token }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ matrix.release.next_tag }}
           TAG_MESSAGE: ${{ matrix.release.domain }} ${{ matrix.release.next_version }}
-          APP_SLUG: ${{ steps.release-app-token.outputs.app-slug }}
+          APP_SLUG: github-actions
         run: |
           set -euo pipefail
 
@@ -700,7 +689,7 @@ jobs:
       - name: Create GitHub release
         if: matrix.release.kind != 'image'
         env:
-          GH_TOKEN: ${{ steps.release-app-token.outputs.token }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ matrix.release.next_tag }}
           EXPECTED_SHA: ${{ github.sha }}
         run: |
