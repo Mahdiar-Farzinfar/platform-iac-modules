@@ -378,6 +378,8 @@ jobs:
     if: needs.prepare.outputs.has_releases == 'true'
     permissions:
       contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
     strategy:
       fail-fast: false
       matrix:
@@ -389,6 +391,34 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: false
+
+      - name: Verify release token
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          permissions_json="$(
+            gh api "repos/${REPOSITORY}" \
+              --jq '.permissions'
+          )"
+
+          echo "Effective repository permissions:"
+          jq . <<< "${permissions_json}"
+
+          push_permission="$(jq -r '.push // false' <<< "${permissions_json}")"
+          if [[ "${push_permission}" != "true" ]]; then
+            echo "::error::The effective release token does not have push permission."
+            echo "::error::Expected repository permission: push=true"
+            exit 1
+          fi
+
+          gh api \
+            "repos/${REPOSITORY}/commits/${GITHUB_SHA}" \
+            --silent \
+            >/dev/null
+
+          echo "Release token and target commit are valid."
 
       - name: Refresh remote tags
         run: |
@@ -412,21 +442,53 @@ jobs:
           echo "${{ matrix.release.notes_b64 }}" | base64 -d > release-notes.md
 
       - name: Create annotated tag
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git tag -a "${{ matrix.release.next_tag }}" -m "${{ matrix.release.domain }} ${{ matrix.release.next_version }}"
-          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "refs/tags/${{ matrix.release.next_tag }}"
+          tag="${{ matrix.release.next_tag }}"
+          message="${{ matrix.release.domain }} ${{ matrix.release.next_version }}"
+
+          git tag -a "${tag}" "${GITHUB_SHA}" -m "${message}"
+          git push \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            "refs/tags/${tag}"
+
+      - name: Verify created tag
+        env:
+          REPOSITORY: ${{ github.repository }}
+          TAG: ${{ matrix.release.next_tag }}
+        run: |
+          set -euo pipefail
+
+          tag_object_sha="$(
+            gh api \
+              "repos/${REPOSITORY}/git/ref/tags/${TAG}" \
+              --jq '.object.sha'
+          )"
+
+          if [[ -z "${tag_object_sha}" ]]; then
+            echo "::error::Tag reference was not created: ${TAG}"
+            exit 1
+          fi
+
+          git fetch --force origin "refs/tags/${TAG}:refs/tags/${TAG}"
+
+          tagged_commit="$(
+            git rev-list -n 1 "refs/tags/${TAG}^{commit}"
+          )"
+
+          if [[ "${tagged_commit}" != "${GITHUB_SHA}" ]]; then
+            echo "::error::Tag ${TAG} points to ${tagged_commit}, expected ${GITHUB_SHA}."
+            exit 1
+          fi
+
+          echo "Verified tag ${TAG} -> ${tagged_commit}"
 
       - name: Create GitHub release
         if: matrix.release.kind != 'image'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
 
@@ -446,6 +508,8 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout
         uses: actions/checkout@1044a6dea927916f2c38ba5aeffbc0a847b1221a  # v7.0.0
@@ -482,7 +546,6 @@ jobs:
           BRANCH_NAME: automation/changelog-${{ github.run_id }}
           SECTIONS_FILE: ${{ steps.sections.outputs.file }}
           REPO: ${{ github.repository }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
 
@@ -534,7 +597,6 @@ jobs:
         if: steps.sections.outputs.file != ''
         env:
           BRANCH_NAME: automation/changelog-${{ github.run_id }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
 
