@@ -405,6 +405,8 @@ jobs:
 
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
           git fetch --force --tags origin
+          git config --global user.name "${APP_SLUG}[bot]"
+          git config --global user.email "${APP_SLUG}[bot]@users.noreply.github.com"
 
       - name: Render release notes
         if: matrix.release.kind != 'image'
