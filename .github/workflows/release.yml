@@ -433,7 +433,7 @@ jobs:
 
           tag_ref="refs/tags/${TAG}"
           tag_ref_api="repos/${GITHUB_REPOSITORY}/git/ref/tags/$(uri_encode "${TAG}")"
-          matching_refs_api="repos/${GITHUB_REPOSITORY}/git/matching-refs/tags/$(uri_encode "${TAG}")"
+          matching_refs_api="repos/${GITHUB_REPOSITORY}/git/matching-refs/tags/${TAG}"
 
           echo "Creating annotated tag"
           echo "  repository : ${GITHUB_REPOSITORY}"
@@ -506,7 +506,7 @@ jobs:
           set +e
           ref_response="$(
             gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
-              --input - <<< "${ref_payload}" 2>&1 || true
+              --input - <<< "${ref_payload}" 2>&1
           )"
           ref_exit=$?
           set -e
@@ -514,15 +514,31 @@ jobs:
           if [[ "${ref_exit}" -eq 0 ]]; then
             echo "Created tag reference: ${TAG}"
             echo "${ref_response}" | jq '{ref, object, node_id, url}' || echo "${ref_response}"
-            exit 0
-          fi
-
-          if race_ref="$(gh api "${tag_ref_api}" 2>/dev/null)"; then
-            echo "Tag was created by another job or in a race: ${TAG}"
+          elif race_ref="$(gh api "${tag_ref_api}" 2>/dev/null)"; then
+            echo "Tag was created concurrently: ${TAG}"
             echo "${race_ref}" | jq '{ref, object, node_id, url}' || echo "${race_ref}"
-            exit 0
+          else
+            echo "::error::Failed to create tag reference: ${TAG}"
+            echo "${ref_response}" >&2
+            exit 1
           fi
 
+          verified_ref="$(gh api "${tag_ref_api}")"
+          verified_object_sha="$(jq -er '.object.sha' <<< "${verified_ref}")"
+          verified_object_type="$(jq -er '.object.type' <<< "${verified_ref}")"
+
+          if [[ "${verified_object_type}" != "tag" ]]; then
+            echo "::error::${TAG} exists but is not an annotated tag."
+            exit 1
+          fi
+
+          if [[ "${verified_object_sha}" != "${tag_object_sha}" ]]; then
+            echo "::error::${TAG} exists but points to a different tag object."
+            echo "expected=${tag_object_sha}, actual=${verified_object_sha}"
+            exit 1
+          fi
+
+          echo "Verified tag reference: ${TAG}"
           echo "::error::Failed to create tag reference: ${TAG}"
           echo "======= TAG REF CREATION FAILURE DIAGNOSTICS =======" >&2
           echo "repository      : ${GITHUB_REPOSITORY}" >&2
@@ -666,12 +682,50 @@ jobs:
         if: matrix.release.kind != 'image'
         env:
           GH_TOKEN: ${{ steps.release-app-token.outputs.token }}
+          TAG: ${{ matrix.release.next_tag }}
+          EXPECTED_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
 
           title="${{ matrix.release.domain }} v${{ matrix.release.next_version }}"
 
-          gh release create "${{ matrix.release.next_tag }}" \
+          uri_encode() {
+            printf '%s' "$1" | jq -sRr @uri
+          }
+
+          tag_ref_api="repos/${GITHUB_REPOSITORY}/git/ref/tags/$(uri_encode "${TAG}")"
+
+          if ! tag_ref="$(gh api "${tag_ref_api}" 2>/dev/null)"; then
+            echo "::error::Expected release tag does not exist: ${TAG}"
+            echo "Refusing to let gh release create create the tag implicitly."
+            exit 1
+          fi
+
+          tag_object_sha="$(jq -er '.object.sha' <<< "${tag_ref}")"
+          tag_object_type="$(jq -er '.object.type' <<< "${tag_ref}")"
+
+          if [[ "${tag_object_type}" != "tag" ]]; then
+            echo "::error::Tag ${TAG} is not an annotated tag; found object type: ${tag_object_type}"
+            exit 1
+          fi
+
+          tag_object="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${tag_object_sha}")"
+          tagged_commit_sha="$(jq -er '.object.sha' <<< "${tag_object}")"
+          tagged_object_type="$(jq -er '.object.type' <<< "${tag_object}")"
+
+          if [[ "${tagged_object_type}" != "commit" ]]; then
+            echo "::error::Annotated tag ${TAG} does not point to a commit."
+            exit 1
+          fi
+
+          if [[ "${tagged_commit_sha}" != "${EXPECTED_SHA}" ]]; then
+            echo "::error::Tag ${TAG} points to ${tagged_commit_sha}, expected ${EXPECTED_SHA}."
+            exit 1
+          fi
+
+          echo "Validated annotated tag ${TAG} -> ${tagged_commit_sha}"
+
+          gh release create "${TAG}" \
             --repo "${GITHUB_REPOSITORY}" \
             --title "${title}" \
             --notes-file release-notes.md
