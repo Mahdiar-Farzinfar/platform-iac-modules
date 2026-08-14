@@ -420,27 +420,19 @@ jobs:
         run: |
           set -euo pipefail
 
-          permissions_json="$(
-            gh api "repos/${REPOSITORY}" \
-              --jq '.permissions'
-          )"
+          echo "Verifying repository access for GitHub App installation token..."
 
-          echo "Effective repository permissions:"
-          jq . <<< "${permissions_json}"
-
-          push_permission="$(jq -r '.push // false' <<< "${permissions_json}")"
-          if [[ "${push_permission}" != "true" ]]; then
-            echo "::error::The effective release token does not have push permission."
-            echo "::error::Expected repository permission: push=true"
-            exit 1
-          fi
+          gh api \
+            "repos/${REPOSITORY}" \
+            --silent \
+            >/dev/null
 
           gh api \
             "repos/${REPOSITORY}/commits/${GITHUB_SHA}" \
             --silent \
             >/dev/null
 
-          echo "Release token and target commit are valid."
+          echo "Release token can access repository metadata and target commit."
 
       - name: Refresh remote tags
         run: |
