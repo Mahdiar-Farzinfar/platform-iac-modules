@@ -455,6 +455,7 @@ jobs:
           tag="${{ matrix.release.next_tag }}"
           message="${{ matrix.release.domain }} ${{ matrix.release.next_version }}"
 
+          echo "Step 1: Creating Git tag object..."
           tag_sha="$(
             gh api \
               --method POST \
@@ -465,13 +466,25 @@ jobs:
               -f type="commit" \
               --jq '.sha'
           )"
+          echo "Tag object created with SHA: ${tag_sha}"
 
-          gh api \
-            --method POST \
-            "repos/${REPOSITORY}/git/refs" \
+          echo "Step 2: Creating ref: refs/tags/${tag}..."
+
+          response=$(gh api --method POST "repos/${REPOSITORY}/git/refs" \
             -f ref="refs/tags/${tag}" \
             -f sha="${tag_sha}" \
-            --silent
+            --include 2>&1 || true)
+
+          echo "--- Full API Response Start ---"
+          echo "$response"
+          echo "--- Full API Response End ---"
+
+          if [[ "$response" == *"201 Created"* ]]; then
+            echo "Success: Tag reference created."
+          else
+            echo "Error: Failed to create ref."
+            exit 1
+          fi
 
       - name: Verify created tag
         env:
