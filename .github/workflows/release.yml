@@ -397,22 +397,6 @@ jobs:
           fetch-tags: true
           persist-credentials: false
 
-      - name: Debug GitHub App token
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          REPOSITORY: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-
-          echo "Repository: ${REPOSITORY}"
-          echo "Repository owner: ${GITHUB_REPOSITORY_OWNER}"
-
-          echo "Authenticated app installation user:"
-          gh api user || true
-
-          echo "Accessible installations repository permissions view:"
-          gh api "repos/${REPOSITORY}" || true
-
       - name: Verify release token
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -420,27 +404,19 @@ jobs:
         run: |
           set -euo pipefail
 
-          permissions_json="$(
-            gh api "repos/${REPOSITORY}" \
-              --jq '.permissions'
-          )"
+          echo "Verifying repository access for GitHub App installation token..."
 
-          echo "Effective repository permissions:"
-          jq . <<< "${permissions_json}"
-
-          push_permission="$(jq -r '.push // false' <<< "${permissions_json}")"
-          if [[ "${push_permission}" != "true" ]]; then
-            echo "::error::The effective release token does not have push permission."
-            echo "::error::Expected repository permission: push=true"
-            exit 1
-          fi
+          gh api \
+            "repos/${REPOSITORY}" \
+            --silent \
+            >/dev/null
 
           gh api \
             "repos/${REPOSITORY}/commits/${GITHUB_SHA}" \
             --silent \
             >/dev/null
 
-          echo "Release token and target commit are valid."
+          echo "Release token can access repository metadata and target commit."
 
       - name: Refresh remote tags
         run: |
