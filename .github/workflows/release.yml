@@ -445,102 +445,40 @@ jobs:
           set -euo pipefail
           echo "${{ matrix.release.notes_b64 }}" | base64 -d > release-notes.md
 
-      - name: Create annotated tag
+      - name: Create GitHub Release and Tag
+        id: create-release
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
 
           tag="${{ matrix.release.next_tag }}"
-          message="${{ matrix.release.domain }} ${{ matrix.release.next_version }}"
-
-          echo "Step 1: Creating Git tag object..."
-          tag_sha="$(
-            gh api \
-              --method POST \
-              "repos/${REPOSITORY}/git/tags" \
-              -f tag="${tag}" \
-              -f message="${message}" \
-              -f object="${GITHUB_SHA}" \
-              -f type="commit" \
-              --jq '.sha'
-          )"
-          echo "Tag object created with SHA: ${tag_sha}"
-
-          echo "Step 2: Creating ref: refs/tags/${tag}..."
-
-          response=$(gh api --method POST "repos/${REPOSITORY}/git/refs" \
-            -f ref="refs/tags/${tag}" \
-            -f sha="${tag_sha}" \
-            --include 2>&1 || true)
-
-          echo "--- Full API Response Start ---"
-          echo "$response"
-          echo "--- Full API Response End ---"
-
-          if [[ "$response" == *"201 Created"* ]]; then
-            echo "Success: Tag reference created."
-          else
-            echo "Error: Failed to create ref."
-            exit 1
-          fi
-
-      - name: Verify created tag
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          REPOSITORY: ${{ github.repository }}
-          TAG: ${{ matrix.release.next_tag }}
-        run: |
-          set -euo pipefail
-
-          tag_object_sha="$(
-            gh api \
-              "repos/${REPOSITORY}/git/ref/tags/${TAG}" \
-              --jq '.object.sha'
-          )"
-
-          if [[ -z "${tag_object_sha}" ]]; then
-            echo "::error::Tag reference was not created: ${TAG}"
-            exit 1
-          fi
-
-          tag_object_type="$(
-            gh api \
-              "repos/${REPOSITORY}/git/ref/tags/${TAG}" \
-              --jq '.object.type'
-          )"
-
-          if [[ "${tag_object_type}" != "tag" ]]; then
-            echo "::error::Expected annotated tag object for ${TAG}, got ${tag_object_type}."
-            exit 1
-          fi
-
-          git fetch --force origin "refs/tags/${TAG}:refs/tags/${TAG}"
-
-          tagged_commit="$(
-            git rev-list -n 1 "refs/tags/${TAG}^{commit}"
-          )"
-
-          if [[ "${tagged_commit}" != "${GITHUB_SHA}" ]]; then
-            echo "::error::Tag ${TAG} points to ${tagged_commit}, expected ${GITHUB_SHA}."
-            exit 1
-          fi
-
-          echo "Verified tag ${TAG} -> ${tagged_commit}"
-
-      - name: Create GitHub release
-        if: matrix.release.kind != 'image'
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: |
-          set -euo pipefail
-
           title="${{ matrix.release.domain }} v${{ matrix.release.next_version }}"
 
-          gh release create "${{ matrix.release.next_tag }}" \
-            --title "${title}" \
-            --notes-file release-notes.md
+          echo "Creating release and tag: ${tag}"
+
+          if [[ -f release-notes.md ]]; then
+            gh release create "${tag}" \
+              --target "${GITHUB_SHA}" \
+              --title "${title}" \
+              --notes-file release-notes.md
+          else
+            gh release create "${tag}" \
+              --target "${GITHUB_SHA}" \
+              --title "${title}" \
+              --notes "Automated release for ${title}"
+          fi
+
+      - name: Verify Tag Placement
+        run: |
+          set -euo pipefail
+          git fetch origin --tags
+          actual_sha=$(git rev-parse "${{ matrix.release.next_tag }}^{commit}")
+          if [[ "${actual_sha}" != "${GITHUB_SHA}" ]]; then
+            echo "Tag points to ${actual_sha} but expected ${GITHUB_SHA}"
+            exit 1
+          fi
+          echo "Tag successfully verified on the correct commit."
 
   changelog:
     name: Update changelog
