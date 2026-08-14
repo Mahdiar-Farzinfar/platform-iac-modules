@@ -416,7 +416,13 @@ jobs:
             --silent \
             >/dev/null
 
-          echo "Release token can access repository metadata and target commit."
+          gh api \
+            "installation/repositories" \
+            --jq '.repositories[].full_name' \
+            | grep -Fx "${REPOSITORY}" \
+            > /dev/null
+
+          echo "Release token can access repository metadata, target commit, and installation scope includes ${REPOSITORY}."
 
       - name: Refresh remote tags
         run: |
@@ -442,19 +448,30 @@ jobs:
       - name: Create annotated tag
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           tag="${{ matrix.release.next_tag }}"
           message="${{ matrix.release.domain }} ${{ matrix.release.next_version }}"
 
-          git tag -a "${tag}" "${GITHUB_SHA}" -m "${message}"
-          git push \
-            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
-            "refs/tags/${tag}"
+          tag_sha="$(
+            gh api \
+              --method POST \
+              "repos/${REPOSITORY}/git/tags" \
+              -f tag="${tag}" \
+              -f message="${message}" \
+              -f object="${GITHUB_SHA}" \
+              -f type="commit" \
+              --jq '.sha'
+          )"
+
+          gh api \
+            --method POST \
+            "repos/${REPOSITORY}/git/refs" \
+            -f ref="refs/tags/${tag}" \
+            -f sha="${tag_sha}" \
+            --silent
 
       - name: Verify created tag
         env:
@@ -472,6 +489,17 @@ jobs:
 
           if [[ -z "${tag_object_sha}" ]]; then
             echo "::error::Tag reference was not created: ${TAG}"
+            exit 1
+          fi
+
+          tag_object_type="$(
+            gh api \
+              "repos/${REPOSITORY}/git/ref/tags/${TAG}" \
+              --jq '.object.type'
+          )"
+
+          if [[ "${tag_object_type}" != "tag" ]]; then
+            echo "::error::Expected annotated tag object for ${TAG}, got ${tag_object_type}."
             exit 1
           fi
 
