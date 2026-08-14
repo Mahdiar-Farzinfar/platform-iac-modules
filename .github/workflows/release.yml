@@ -397,7 +397,7 @@ jobs:
           fetch-tags: true
           persist-credentials: false
 
-      - name: Verify release token
+      - name: Debug GitHub App token
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           REPOSITORY: ${{ github.repository }}
