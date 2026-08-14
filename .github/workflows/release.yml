@@ -26,8 +26,6 @@ jobs:
     name: Discover release domains
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    permissions:
-      contents: read
     outputs:
       domains: ${{ steps.discover.outputs.domains }}
       has_domains: ${{ steps.discover.outputs.has_domains }}
@@ -162,8 +160,6 @@ jobs:
     timeout-minutes: 10
     needs: discover
     if: needs.discover.outputs.has_domains == 'true'
-    permissions:
-      contents: read
     outputs:
       releases: ${{ steps.prepare.outputs.releases }}
       has_releases: ${{ steps.prepare.outputs.has_releases }}
@@ -223,9 +219,9 @@ jobs:
             local line
             # ERE patterns for Conventional Commits (unquoted on =~ RHS).
             local re_breaking_footer='BREAKING[[:space:]]CHANGE:'
-            local re_breaking_type='^[a-zA-Z0-9_-]+(\([^)]+\))?!:'
-            local re_feat='^feat(\([^)]+\))?:'
-            local re_patch='^(fix|perf|refactor|revert|security)(\([^)]+\))?:'
+            local re_breaking_type='^[a-zA-Z0-9_-]+(\\([^)]+\\))?!:'
+            local re_feat='^feat(\\([^)]+\\))?:'
+            local re_patch='^(fix|perf|refactor|revert|security)(\\([^)]+\\))?:'
 
             while IFS= read -r line; do
               [[ -z "${line}" ]] && continue
@@ -378,11 +374,22 @@ jobs:
     if: needs.prepare.outputs.has_releases == 'true'
     permissions:
       contents: write
+      packages: write
     strategy:
       fail-fast: false
       matrix:
         release: ${{ fromJson(needs.prepare.outputs.releases || '[]') }}
     steps:
+      - name: Create GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: |
+            ${{ github.event.repository.name }}
+          permission-contents: write
       - name: Checkout
         uses: actions/checkout@1044a6dea927916f2c38ba5aeffbc0a847b1221a  # v7.0.0
         with:
@@ -411,30 +418,40 @@ jobs:
           set -euo pipefail
           echo "${{ matrix.release.notes_b64 }}" | base64 -d > release-notes.md
 
-      - name: Create annotated tag
+      - name: Create GitHub Release and Tag
+        id: create-release
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git tag -a "${{ matrix.release.next_tag }}" -m "${{ matrix.release.domain }} ${{ matrix.release.next_version }}"
-          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "refs/tags/${{ matrix.release.next_tag }}"
-
-      - name: Create GitHub release
-        if: matrix.release.kind != 'image'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-
+          tag="${{ matrix.release.next_tag }}"
           title="${{ matrix.release.domain }} v${{ matrix.release.next_version }}"
 
-          gh release create "${{ matrix.release.next_tag }}" \
-            --title "${title}" \
-            --notes-file release-notes.md
+          echo "Creating release and tag: ${tag}"
+
+          if [[ -f release-notes.md ]]; then
+            gh release create "${tag}" \
+              --target "${GITHUB_SHA}" \
+              --title "${title}" \
+              --notes-file release-notes.md
+          else
+            gh release create "${tag}" \
+              --target "${GITHUB_SHA}" \
+              --title "${title}" \
+              --notes "Automated release for ${title}"
+          fi
+
+      - name: Verify Tag Placement
+        run: |
+          set -euo pipefail
+          git fetch origin --tags
+          actual_sha=$(git rev-parse "${{ matrix.release.next_tag }}^{commit}")
+          if [[ "${actual_sha}" != "${GITHUB_SHA}" ]]; then
+            echo "Tag points to ${actual_sha} but expected ${GITHUB_SHA}"
+            exit 1
+          fi
+          echo "Tag successfully verified on the correct commit."
 
   changelog:
     name: Update changelog
@@ -447,6 +464,18 @@ jobs:
       contents: write
       pull-requests: write
     steps:
+      - name: Create GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: |
+            ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+
       - name: Checkout
         uses: actions/checkout@1044a6dea927916f2c38ba5aeffbc0a847b1221a  # v7.0.0
         with:
@@ -479,10 +508,10 @@ jobs:
       - name: Update CHANGELOG.md
         if: steps.sections.outputs.file != ''
         env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           BRANCH_NAME: automation/changelog-${{ github.run_id }}
           SECTIONS_FILE: ${{ steps.sections.outputs.file }}
           REPO: ${{ github.repository }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
 
@@ -533,8 +562,8 @@ jobs:
       - name: Create pull request for CHANGELOG.md
         if: steps.sections.outputs.file != ''
         env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           BRANCH_NAME: automation/changelog-${{ github.run_id }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
 
