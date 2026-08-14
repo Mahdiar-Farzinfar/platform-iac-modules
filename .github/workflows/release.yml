@@ -397,6 +397,22 @@ jobs:
           fetch-tags: true
           persist-credentials: false
 
+      - name: Debug GitHub App token
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          echo "Repository: ${REPOSITORY}"
+          echo "Repository owner: ${GITHUB_REPOSITORY_OWNER}"
+
+          echo "Authenticated app installation user:"
+          gh api user || true
+
+          echo "Accessible installations repository permissions view:"
+          gh api "repos/${REPOSITORY}" || true
+
       - name: Verify release token
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
