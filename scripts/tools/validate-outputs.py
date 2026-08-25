@@ -7,7 +7,7 @@ to prevent output/command/path injection across automation layers (Taskfile, she
 
 Usage:
   python3 scripts/tools/validate-outputs.py \
-      --go "1.22.3" \
+      --go "1.26.0" \
       --terraform "1.15.6" \
       --python "3.12.4" \
       --tflint "0.56.0" \
