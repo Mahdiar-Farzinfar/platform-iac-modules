@@ -206,7 +206,7 @@ tasks:
     cmds:
       - |
         if [ -f "{{.TESTS_XPLAT_DIR}}/test-linux.sh" ]; then
-          sh "{{.TESTS_XPLAT_DIR}}/test-linux.sh"
+          bash "{{.TESTS_XPLAT_DIR}}/test-linux.sh"
         else
           echo "Skipping: {{.TESTS_XPLAT_DIR}}/test-linux.sh not found"
         fi
@@ -217,7 +217,7 @@ tasks:
     cmds:
       - |
         if [ -f "{{.TESTS_XPLAT_DIR}}/test-macos.sh" ]; then
-          sh "{{.TESTS_XPLAT_DIR}}/test-macos.sh"
+          bash "{{.TESTS_XPLAT_DIR}}/test-macos.sh"
         else
           echo "Skipping: {{.TESTS_XPLAT_DIR}}/test-macos.sh not found"
         fi
@@ -530,7 +530,8 @@ tasks:
         find "{{.MODULES_DIR}}" -type f -name 'main.tf' ! -path '*/.terraform/*' -printf '%h\n' \
           | sort -u \
           | while IFS= read -r module_path; do
-              if [ -f "${module_path}/tests/tftest.hcl" ]; then
+              test_file="$(find "${module_path}/tests" -maxdepth 1 -type f -name '*.tftest.hcl' -print -quit 2>/dev/null || true)"
+              if [ -n "${test_file}" ]; then
                 echo "==> terraform test: ${module_path}"
                 terraform -chdir="${module_path}" test
               fi
@@ -554,13 +555,13 @@ tasks:
             exit 0
           fi
           dirs=$(
-            find "{{.MODULES_DIR}}" -type f -name "integration-test.go" -exec dirname {} \; 2>/dev/null |
+            find "{{.MODULES_DIR}}" -type f -name "integration_test.go" -exec dirname {} \; 2>/dev/null |
             xargs -I{} dirname {} |
             sort -u
           )
 
           if [ -z "$dirs" ]; then
-            echo "No integration-test.go files found. Skipping go test."
+            echo "No integration_test.go files found. Skipping go test."
             exit 0
           fi
 
