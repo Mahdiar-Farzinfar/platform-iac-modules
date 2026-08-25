@@ -167,7 +167,7 @@ function Invoke-Preflight {
 function Invoke-Init {
     Assert-RequiredParam -Name 'ModulesDir' -Value $ModulesDir
 
-    $moduleDirs = Get-TerraformModuleDirs -ModulesDir $ModulesDir
+    $moduleDirs = @(Get-TerraformModuleDirs -ModulesDir $ModulesDir)
     if ($moduleDirs.Count -eq 0) {
         Write-Host "No Terraform modules found under $ModulesDir"
         return
@@ -176,7 +176,7 @@ function Invoke-Init {
     foreach ($modulePath in $moduleDirs) {
         Write-Host "==> terraform init: $modulePath"
         Invoke-Native {
-            terraform -chdir=$modulePath init -backend=false -upgrade
+            terraform "-chdir=$modulePath" init -backend=false -upgrade
         }
     }
 }
@@ -203,7 +203,7 @@ function Invoke-FmtGo {
 function Invoke-ValidateTerraform {
     Assert-RequiredParam -Name 'ModulesDir' -Value $ModulesDir
 
-    $moduleDirs = Get-TerraformModuleDirs -ModulesDir $ModulesDir
+    $moduleDirs = @(Get-TerraformModuleDirs -ModulesDir $ModulesDir)
     if ($moduleDirs.Count -eq 0) {
         Write-Host "No Terraform modules found under $ModulesDir"
         return
@@ -212,10 +212,10 @@ function Invoke-ValidateTerraform {
     foreach ($modulePath in $moduleDirs) {
         Write-Host "==> terraform validate: $modulePath"
         Invoke-Native {
-            terraform -chdir=$modulePath init -backend=false -upgrade
+            terraform "-chdir=$modulePath" init -backend=false -upgrade
         }
         Invoke-Native {
-            terraform -chdir=$modulePath validate
+            terraform "-chdir=$modulePath" validate
         }
     }
 }
@@ -225,7 +225,7 @@ function Invoke-LintTflint {
     Assert-RequiredParam -Name 'ConfigPath' -Value $ConfigPath
 
     Assert-PathExists -Path $ConfigPath -Label 'tflint config'
-    $moduleDirs = Get-TerraformModuleDirs -ModulesDir $ModulesDir
+    $moduleDirs = @(Get-TerraformModuleDirs -ModulesDir $ModulesDir)
     if ($moduleDirs.Count -eq 0) {
         Write-Host "No Terraform modules found under $ModulesDir"
         return
@@ -273,7 +273,7 @@ function Invoke-DocsGenerate {
     Assert-RequiredParam -Name 'TerraformDocsConfig' -Value $TerraformDocsConfig
 
     Assert-PathExists -Path $TerraformDocsConfig -Label 'terraform-docs config'
-    $moduleDirs = Get-TerraformModuleDirs -ModulesDir $ModulesDir
+    $moduleDirs = @(Get-TerraformModuleDirs -ModulesDir $ModulesDir)
     if ($moduleDirs.Count -eq 0) {
         Write-Host "No Terraform modules found under $ModulesDir"
         return
@@ -305,21 +305,29 @@ function Invoke-DocsCheck {
 function Invoke-TestTerraform {
     Assert-RequiredParam -Name 'ModulesDir' -Value $ModulesDir
 
-    $moduleDirs = Get-TerraformModuleDirs -ModulesDir $ModulesDir
+    $moduleDirs = @(Get-TerraformModuleDirs -ModulesDir $ModulesDir)
     if ($moduleDirs.Count -eq 0) {
         Write-Host "No Terraform modules found under $ModulesDir"
         return
     }
 
     foreach ($modulePath in $moduleDirs) {
-        $testFile = Join-Path $modulePath 'tests/tftest.hcl'
-        if (-not (Test-Path -LiteralPath $testFile)) {
+        $testsDir = Join-Path $modulePath 'tests'
+        $testFiles = @(
+            Get-ChildItem `
+                -LiteralPath $testsDir `
+                -Filter '*.tftest.hcl' `
+                -File `
+                -ErrorAction SilentlyContinue
+        )
+
+        if ($testFiles.Count -eq 0) {
             continue
         }
 
         Write-Host "==> terraform test: $modulePath"
         Invoke-Native {
-            terraform -chdir=$modulePath test
+            terraform "-chdir=$modulePath" test
         }
     }
 }
