@@ -64,7 +64,6 @@ var (
 		"terraform":      "main/terraform",
 		"tflint":         "main/tflint",
 		"terraform-docs": "main/terraform-docs",
-		"golangci-lint":  "main/golangci-lint",
 		"trivy":          "main/trivy",
 		"gitleaks":       "main/gitleaks",
 		"checkov":        "main/checkov",
@@ -85,7 +84,6 @@ var (
 		"terraform":      "Hashicorp.Terraform",
 		"tflint":         "TerraformLinters.tflint",
 		"terraform-docs": "terraform-docs.terraform-docs",
-		"golangci-lint":  "GoLangCI.golangci-lint",
 		"trivy":          "AquaSecurity.Trivy",
 		"gitleaks":       "Gitleaks.Gitleaks",
 		"checkov":        "Bridgecrew.Checkov",
@@ -133,6 +131,13 @@ var (
 			return VerifySpec{
 				AssetNamePattern: fmt.Sprintf("gitleaks_%s_windows_x64.zip", v),
 				ChecksumURL:      fmt.Sprintf("https://github.com/gitleaks/gitleaks/releases/download/v%s/gitleaks_%s_checksums.txt", v, v),
+			}, nil
+		},
+		"golangci-lint": func(v string) (VerifySpec, error) {
+			v = normalizeSemver(v)
+			return VerifySpec{
+				AssetNamePattern: fmt.Sprintf("golangci-lint-%s-windows-amd64.zip", v),
+				ChecksumURL:      fmt.Sprintf("https://github.com/golangci/golangci-lint/releases/download/v%s/golangci-lint-%s-checksums.txt", v, v),
 			}, nil
 		},
 		"shfmt": func(v string) (VerifySpec, error) {
@@ -352,6 +357,16 @@ if (-not (Get-Command scoop -ErrorAction SilentlyContinue)) {
 // Winget (plus existing github/pip/npm paths inside installWithWinget) is last resort only.
 func installToolWithFallback(res *InstallResult, tool string, spec ToolSpec) error {
 	var attempts []string
+
+	// golangci-lint is installed directly from its pinned GitHub release,
+	// matching the canonical installer and avoiding package-manager drift.
+	if tool == "golangci-lint" {
+		if err := installFromGitHubRelease(res, tool, spec); err != nil {
+			return fmt.Errorf("github install failed: %w", err)
+		}
+		res.Backend = "github"
+		return nil
+	}
 
 	// 1) Scoop primary
 	if scoopRef, ok := scoopMap[tool]; ok {
@@ -617,7 +632,7 @@ func installWingetFallbackBinary(res *InstallResult, tool string, spec ToolSpec)
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	archivePath := filepath.Join(tmpDir, filepath.Base(a.url))
 	if err := downloadFile(archivePath, a.url); err != nil {
@@ -671,7 +686,7 @@ func installFromGitHubRelease(res *InstallResult, tool string, spec ToolSpec) er
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	assetPath := filepath.Join(tmpDir, filepath.Base(vspec.AssetNamePattern))
 	if err := downloadFile(assetPath, assetURL); err != nil {
@@ -700,6 +715,13 @@ func installFromGitHubRelease(res *InstallResult, tool string, spec ToolSpec) er
 	}
 
 	binDir := filepath.Join(defaultToolsBinDir(), tool, normalizeSemver(spec.Version))
+	if tool == "golangci-lint" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("resolve user home directory: %w", err)
+		}
+		binDir = filepath.Join(home, "bin")
+	}
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		return err
 	}
@@ -781,7 +803,7 @@ func installDockerRelatedFallback(res *InstallResult, tool string, spec ToolSpec
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	archivePath := filepath.Join(tmpDir, filepath.Base(a.url))
 	if err := downloadFile(archivePath, a.url); err != nil {
@@ -892,7 +914,7 @@ func fetchSingleHash(url string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("GET %s: status %d", url, resp.StatusCode)
 	}
@@ -925,6 +947,8 @@ func resolveReleaseAssetURL(tool, version, assetName string) (string, error) {
 		return fmt.Sprintf("https://github.com/aquasecurity/trivy/releases/download/v%s/%s", v, assetName), nil
 	case "gitleaks":
 		return fmt.Sprintf("https://github.com/gitleaks/gitleaks/releases/download/v%s/%s", v, assetName), nil
+	case "golangci-lint":
+		return fmt.Sprintf("https://github.com/golangci/golangci-lint/releases/download/v%s/%s", v, assetName), nil
 	case "shfmt":
 		return fmt.Sprintf("https://github.com/mvdan/sh/releases/download/v%s/%s", v, assetName), nil
 	default:
@@ -944,7 +968,7 @@ func downloadFile(dest, url string) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("GET %s: status %d", url, resp.StatusCode)
 	}
@@ -952,9 +976,11 @@ func downloadFile(dest, url string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	_, err = io.Copy(f, resp.Body)
-	return err
+	defer func() { _ = f.Close() }()
+	if _, err := io.Copy(f, resp.Body); err != nil {
+		return err
+	}
+	return f.Close()
 }
 
 func fileSHA256(path string) (string, error) {
@@ -962,7 +988,7 @@ func fileSHA256(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
 		return "", err
@@ -981,7 +1007,7 @@ func lookupChecksum(checksumURL, assetName string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("GET %s: status %d", checksumURL, resp.StatusCode)
 	}
@@ -1056,7 +1082,10 @@ func looksLikeSHA256(s string) bool {
 		return false
 	}
 	for _, r := range s {
-		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')) {
+		isDigit := r >= '0' && r <= '9'
+		isLowerHex := r >= 'a' && r <= 'f'
+		isUpperHex := r >= 'A' && r <= 'F'
+		if !isDigit && !isLowerHex && !isUpperHex {
 			return false
 		}
 	}
@@ -1068,7 +1097,7 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
@@ -1078,7 +1107,7 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	defer func() { _ = out.Close() }()
 
 	if _, err := io.Copy(out, in); err != nil {
 		return err
@@ -1091,7 +1120,7 @@ func unzipExecutable(zipPath, destExe, exeName string) error {
 	if err != nil {
 		return err
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	targetName := strings.ToLower(filepath.Base(exeName))
 
@@ -1114,7 +1143,7 @@ func unzipExecutable(zipPath, destExe, exeName string) error {
 
 		out, err := os.OpenFile(destExe, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
 		if err != nil {
-			rc.Close()
+			_ = rc.Close()
 			return err
 		}
 
@@ -2106,7 +2135,7 @@ func httpGet(url string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", fmt.Errorf("http status=%d url=%s", resp.StatusCode, url)
@@ -2123,7 +2152,7 @@ func parseToolVersions(path string) (map[string]ToolSpec, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	out := map[string]ToolSpec{}
 	sc := bufio.NewScanner(f)
