@@ -90,6 +90,20 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Read required Python version
+        id: python-version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(awk '$1 == "python" { print $2; exit }' tooling/.tool-versions)"
+          test -n "${version}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Setup Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ steps.python-version.outputs.version }}
+
       - name: Bootstrap toolchain (Task SoT)
         run: |
           set -euo pipefail
