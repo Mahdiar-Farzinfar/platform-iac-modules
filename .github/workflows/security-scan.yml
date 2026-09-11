@@ -27,7 +27,6 @@ env:
   CHECKOV_OUTPUT_DIR: .security-results/checkov
   TRIVY_OUTPUT_DIR: .security-results/trivy
   OSV_OUTPUT_DIR: .security-results/osv
-  PATH_EXTRA: ${{ github.workspace }}/.bin:${{ github.workspace }}/bin:${{ github.workspace }}/tooling/bin:$HOME/.local/bin:$HOME/go/bin:$HOME/.asdf/shims
 
 jobs:
   detect-targets:
@@ -81,33 +80,19 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Setup Task
-        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
-
-      - name: Setup Go (bootstrap installer)
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Bootstrap toolchain (Task SoT)
+      - name: Read required Python version
+        id: python-version
+        shell: bash
         run: |
           set -euo pipefail
-          export PATH="${PATH_EXTRA}:${PATH}"
-          if task --list 2>/dev/null | grep -qE '^[[:space:]]*bootstrap([[:space:]]|$)'; then
-            task bootstrap:posix -- --apply --non-interactive
-          else
-            task bootstrap:posix -- --apply --non-interactive
-          fi
-          echo "${PATH_EXTRA}" | tr ':' '\n' | while read -r d; do
-            [ -n "${d}" ] && echo "${d}" >> "${GITHUB_PATH}"
-          done
-          if [ -d "${HOME}/.asdf/shims" ]; then
-            echo "${HOME}/.asdf/shims" >> "${GITHUB_PATH}"
-          fi
+          version="$(awk '$1 == "python" { print $2; exit }' tooling/.tool-versions)"
+          test -n "${version}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
 
-      - name: Preflight (Taskfile SoT)
-        run: task preflight
+      - name: Setup Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ steps.python-version.outputs.version }}
 
       - name: Prepare output directories
         run: |
@@ -116,7 +101,8 @@ jobs:
 
       - name: Run Checkov SARIF
         run: |
-          pip install checkov
+          python -m pip install --upgrade pip
+          python -m pip install checkov
           checkov -d . --framework terraform --quiet --soft-fail \
             --output sarif \
             --output-file-path "${CHECKOV_OUTPUT_DIR}" \
@@ -135,6 +121,15 @@ jobs:
           sarif_file: .security-results/checkov/results_sarif.sarif
           category: checkov
 
+      - name: Upload Checkov report artifact
+        if: always()
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808  # v4.6.0
+        with:
+          name: security-report-checkov-${{ github.run_id }}
+          path: .security-results/checkov/**
+          if-no-files-found: ignore
+          retention-days: 14
+
   trivy-iac:
     name: Trivy IaC and FS Scan
     runs-on: ubuntu-latest
@@ -150,34 +145,6 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 1
-
-      - name: Setup Task
-        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
-
-      - name: Setup Go (bootstrap installer)
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Bootstrap toolchain (Task SoT)
-        run: |
-          set -euo pipefail
-          export PATH="${PATH_EXTRA}:${PATH}"
-          if task --list 2>/dev/null | grep -qE '^[[:space:]]*bootstrap([[:space:]]|$)'; then
-            task bootstrap:posix -- --apply --non-interactive
-          else
-            task bootstrap:posix -- --apply --non-interactive
-          fi
-          echo "${PATH_EXTRA}" | tr ':' '\n' | while read -r d; do
-            [ -n "${d}" ] && echo "${d}" >> "${GITHUB_PATH}"
-          done
-          if [ -d "${HOME}/.asdf/shims" ]; then
-            echo "${HOME}/.asdf/shims" >> "${GITHUB_PATH}"
-          fi
-
-      - name: Preflight (Taskfile SoT)
-        run: task preflight
 
       - name: Prepare output directories
         run: |
@@ -205,6 +172,7 @@ jobs:
           exit-code: 1
 
       - name: Run Trivy filesystem scan
+        if: always()
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
         with:
           scan-type: fs
@@ -231,6 +199,15 @@ jobs:
           sarif_file: .security-results/trivy/trivy-fs.sarif
           category: trivy-fs
 
+      - name: Upload Trivy report artifact
+        if: always()
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808  # v4.6.0
+        with:
+          name: security-report-trivy-${{ github.run_id }}
+          path: .security-results/trivy/**
+          if-no-files-found: ignore
+          retention-days: 14
+
   gitleaks:
     name: Secret Scan
     runs-on: ubuntu-latest
@@ -243,15 +220,6 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-
-      - name: Setup Task
-        uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
-
-      - name: Setup Go (bootstrap installer)
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: true
 
       - name: Install Gitleaks (version from tooling/.tool-versions)
         run: |
@@ -282,24 +250,26 @@ jobs:
           echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
           "${HOME}/.local/bin/gitleaks" version
 
-      - name: Bootstrap toolchain (Task SoT)
+      - name: Run Gitleaks
         run: |
           set -euo pipefail
-          export PATH="${PATH_EXTRA}:${PATH}"
-          if task --list 2>/dev/null | grep -qE '^[[:space:]]*bootstrap([[:space:]]|$)'; then
-            task bootstrap:posix -- --apply --non-interactive
-          else
-            task bootstrap:posix -- --apply --non-interactive
-          fi
-          echo "${PATH_EXTRA}" | tr ':' '\n' | while read -r d; do
-            [ -n "${d}" ] && echo "${d}" >> "${GITHUB_PATH}"
-          done
-          if [ -d "${HOME}/.asdf/shims" ]; then
-            echo "${HOME}/.asdf/shims" >> "${GITHUB_PATH}"
-          fi
+          mkdir -p .security-results/gitleaks
+          gitleaks detect \
+            --source . \
+            --no-git \
+            --redact \
+            --exit-code 1 \
+            --report-format sarif \
+            --report-path .security-results/gitleaks/gitleaks.sarif
 
-      - name: Run Gitleaks from Taskfile (SoT)
-        run: task security:gitleaks TASK_X_SKIP_DEPS=1
+      - name: Upload Gitleaks report artifact
+        if: always()
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808  # v4.6.0
+        with:
+          name: security-report-gitleaks-${{ github.run_id }}
+          path: .security-results/gitleaks/**
+          if-no-files-found: ignore
+          retention-days: 14
 
   osv-scanner:
     name: Dependency Vulnerability Scan
@@ -341,23 +311,34 @@ jobs:
           GOPATH="$(go env GOPATH)"
           export PATH="${GOPATH}/bin:${PATH}"
           osv-scanner --recursive --format=json \
-            --output="${OSV_OUTPUT_DIR}/osv-results.json" \
-            . || true
+            --output-file="${OSV_OUTPUT_DIR}/osv-results.json" \
+            .
+
+      - name: Upload OSV-Scanner report artifact
+        if: always()
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808  # v4.6.0
+        with:
+          name: security-report-osv-${{ github.run_id }}
+          path: .security-results/osv/**
+          if-no-files-found: ignore
+          retention-days: 14
 
   upload-reports:
     name: Upload Security Reports
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
-    needs: [checkov, trivy-iac, osv-scanner]
+    needs: [checkov, trivy-iac, gitleaks, osv-scanner]
     permissions:
       contents: read
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - name: Download security report artifacts
+        if: always()
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
         with:
-          persist-credentials: false
-          fetch-depth: 1
+          pattern: security-report-*-${{ github.run_id }}
+          path: .security-results
+          merge-multiple: true
 
       - name: Upload security artifacts
         if: always() && hashFiles('.security-results/**') != ''

@@ -10,7 +10,7 @@ gitleaks 8.30.1
 checkov 3.3.8
 python 3.12.4
 nodejs 24.18.0
-golangci-lint 1.59.1
+golangci-lint 2.13.1
 pre-commit 4.0.1
 markdownlint 0.17.2
 yamllint 1.37.1
