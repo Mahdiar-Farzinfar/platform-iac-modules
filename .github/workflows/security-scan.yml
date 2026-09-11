@@ -311,7 +311,7 @@ jobs:
           GOPATH="$(go env GOPATH)"
           export PATH="${GOPATH}/bin:${PATH}"
           osv-scanner --recursive --format=json \
-            --output="${OSV_OUTPUT_DIR}/osv-results.json" \
+            --output-file="${OSV_OUTPUT_DIR}/osv-results.json" \
             .
 
       - name: Upload OSV-Scanner report artifact
