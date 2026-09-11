@@ -1,0 +1,195 @@
+/* ==========================================================================
+   Platform IaC Modules — Material for MkDocs overrides
+   --------------------------------------------------------------------------
+   Conventions:
+   - Prefer overriding Material's CSS custom properties over raw selectors,
+     so upgrades of mkdocs-material stay low-risk.
+   - Scope color changes to [data-md-color-scheme="default"|"slate"] so both
+     light and dark palettes stay accessible (WCAG AA contrast).
+   - Keep specificity minimal; never use !important.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. Design tokens
+   -------------------------------------------------------------------------- */
+
+:root {
+  /* Brand accents used below (single source of truth) */
+  --iac-brand:        #3f51b5;  /* indigo 500 — matches theme palette */
+  --iac-brand-dark:   #7986cb;  /* indigo 300 — readable on slate bg   */
+  --iac-code-radius:  0.4rem;
+  --iac-table-radius: 0.4rem;
+}
+
+/* Light scheme */
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color: var(--iac-brand);
+  --md-accent-fg-color:  #536dfe;
+
+  /* Slightly softer inline-code background than the default */
+  --md-code-bg-color: #f5f6fa;
+}
+
+/* Dark scheme */
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: var(--iac-brand-dark);
+  --md-accent-fg-color:  #8c9eff;
+
+  /* Increase base contrast a touch for long-form technical reading */
+  --md-default-bg-color: #14151a;
+  --md-code-bg-color:    #1e2029;
+}
+
+/* --------------------------------------------------------------------------
+   2. Layout: wider content area for code-heavy pages
+   -------------------------------------------------------------------------- */
+
+/* Default 61rem is tight for Terraform blocks and wide tables */
+.md-grid {
+  max-width: 72rem;
+}
+
+/* --------------------------------------------------------------------------
+   3. Typography
+   -------------------------------------------------------------------------- */
+
+/* Tighter, clearer heading hierarchy */
+.md-typeset h1 {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.md-typeset h2 {
+  font-weight: 600;
+  margin-top: 2em;
+}
+
+/* Slightly larger code for readability (Material default is 0.85em) */
+.md-typeset code,
+.md-typeset pre > code {
+  font-size: 0.9em;
+}
+
+/* --------------------------------------------------------------------------
+   4. Code blocks
+   -------------------------------------------------------------------------- */
+
+.md-typeset pre > code {
+  border-radius: var(--iac-code-radius);
+}
+
+/* Filename / title bar on fenced blocks (
+```hcl title="main.tf") */
+.md-typeset .highlight span.filename {
+  border-top-left-radius: var(--iac-code-radius);
+  border-top-right-radius: var(--iac-code-radius);
+  font-weight: 600;
+}
+
+/* Make the copy button easier to discover */
+.md-clipboard {
+  color: var(--md-default-fg-color--lighter);
+}
+
+.md-clipboard:hover {
+  color: var(--md-accent-fg-color);
+}
+
+/* --------------------------------------------------------------------------
+   5. Tables (inputs/outputs reference tables)
+   -------------------------------------------------------------------------- */
+
+.md-typeset table:not([class]) {
+  border-radius: var(--iac-table-radius);
+  font-size: 0.72rem;          /* denser rows for variable/output tables */
+}
+
+.md-typeset table:not([class]) th {
+  background-color: var(--md-default-fg-color--lightest);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* Zebra striping improves scanning of long input tables */
+.md-typeset table:not([class]) tbody tr:nth-child(even) {
+  background-color: var(--md-default-fg-color--lightest);
+}
+
+/* Keep `type` and `default` columns from wrapping awkwardly */
+.md-typeset table:not([class]) td code {
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------------------------------
+   6. Custom admonition: "compliance" (security-baseline callouts)
+   Usage:
+!!! compliance "CIS 3.1"
+CloudTrail must be enabled in all regions.
+   -------------------------------------------------------------------------- */
+
+:root {
+  --iac-compliance-color: #00897b; /* teal 600 */
+  /* Material icon: shield-check (inline SVG mask) */
+  --iac-compliance-icon: url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 17l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9m-6-7L3 6v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V6l-9-4z"/></svg>');
+}
+
+.md-typeset .admonition.compliance,
+.md-typeset details.compliance {
+  border-color: var(--iac-compliance-color);
+}
+
+.md-typeset .compliance > .admonition-title,
+.md-typeset .compliance > summary {
+  background-color: color-mix(in srgb, var(--iac-compliance-color) 10%, transparent);
+}
+
+.md-typeset .compliance > .admonition-title::before,
+.md-typeset .compliance > summary::before {
+  background-color: var(--iac-compliance-color);
+  -webkit-mask-image: var(--iac-compliance-icon);
+mask-image: var(--iac-compliance-icon);
+}
+
+/* --------------------------------------------------------------------------
+   7. Navigation polish
+   -------------------------------------------------------------------------- */
+
+/* Emphasize the active nav item */
+.md-nav__link--active {
+  font-weight: 700;
+}
+
+/* Subtle external-link indicator in the footer social area */
+.md-social__link:hover {
+  color: var(--md-accent-fg-color);
+}
+
+/* --------------------------------------------------------------------------
+   8. Mermaid diagrams
+   -------------------------------------------------------------------------- */
+
+/* Center diagrams and give them breathing room */
+.md-typeset .mermaid {
+  display: flex;
+  justify-content: center;
+  margin: 1.5em 0;
+}
+
+/* --------------------------------------------------------------------------
+   9. Print styles
+   -------------------------------------------------------------------------- */
+
+@media print {
+  /* Hide chrome that has no value on paper/PDF exports */
+  .md-header,
+  .md-tabs,
+  .md-footer,
+  .md-sidebar,
+  .md-clipboard {
+display: none;
+  }
+
+  .md-typeset pre > code {
+white-space: pre-wrap;   /* avoid clipped Terraform snippets */
+  }
+}
