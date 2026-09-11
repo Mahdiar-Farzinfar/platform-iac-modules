@@ -1,0 +1,113 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:best-practices",
+    ":semanticCommits",
+    ":enablePreCommit",
+    "helpers:pinGitHubActionDigestsToSemver",
+    ":dependencyDashboard",
+    "security:openssf-scorecard"
+  ],
+  "timezone": "UTC",
+  "schedule": ["before 6am on monday"],
+  "labels": ["dependencies"],
+  "prConcurrentLimit": 10,
+  "prHourlyLimit": 4,
+  "minimumReleaseAge": "3 days",
+  "osvVulnerabilityAlerts": true,
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "labels": ["security"],
+    "schedule": ["at any time"],
+    "minimumReleaseAge": null,
+    "prPriority": 10
+  },
+  "postUpdateOptions": ["gomodTidy"],
+  "pre-commit": {
+    "managerFilePatterns": [
+      "/(^|/)\\.pre-commit-config\\.ya?ml$/",
+      "/^tooling/cross-platform/pre-commit-hooks\\.yaml$/"
+    ]
+  },
+  "asdf": {
+    "managerFilePatterns": [
+      "/(^|/)\\.tool-versions$/",
+      "/^tooling/cross-platform/asdf-tool-versions$/"
+    ]
+  },
+  "packageRules": [
+    {
+      "description": "Group all Terraform provider updates (minor/patch) into one PR",
+      "matchManagers": ["terraform"],
+      "matchDepTypes": ["required_provider", "provider"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "terraform providers (non-major)",
+      "semanticCommitType": "fix",
+      "semanticCommitScope": "terraform"
+    },
+    {
+      "description": "Major provider bumps get their own PR and extra scrutiny",
+      "matchManagers": ["terraform"],
+      "matchDepTypes": ["required_provider", "provider"],
+      "matchUpdateTypes": ["major"],
+      "labels": ["dependencies", "breaking-change"],
+      "minimumReleaseAge": "7 days"
+    },
+    {
+      "description": "Pin and group GitHub Actions; safe to automerge digest/patch bumps once CI is green",
+      "matchManagers": ["github-actions"],
+      "groupName": "github actions",
+      "semanticCommitScope": "ci",
+      "matchUpdateTypes": ["digest", "pin", "pinDigest", "patch"],
+      "automerge": true,
+      "platformAutomerge": true
+    },
+    {
+      "description": "Go modules: group non-major updates",
+      "matchManagers": ["gomod"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "go modules (non-major)",
+      "semanticCommitScope": "go"
+    },
+    {
+      "description": "DevContainer image, features and Dockerfile base images",
+      "matchManagers": ["devcontainer", "dockerfile"],
+      "groupName": "devcontainer",
+      "semanticCommitScope": "devcontainer"
+    },
+    {
+      "description": "Toolchain versions managed via asdf / .terraform-version / tflint plugins",
+      "matchManagers": ["asdf", "terraform-version", "tflint-plugin"],
+      "groupName": "toolchain",
+      "semanticCommitScope": "tooling"
+    },
+    {
+      "description": "pre-commit hooks are low-risk; automerge non-major",
+      "matchManagers": ["pre-commit"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "pre-commit hooks",
+      "automerge": true,
+      "platformAutomerge": true
+    },
+    {
+      "description": "MkDocs documentation stack: group non-major, automerge (mkdocs build --strict gates in CI)",
+      "matchManagers": ["pip_requirements"],
+      "matchFileNames": ["docs/requirements.txt"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "docs (mkdocs)",
+      "semanticCommitType": "chore",
+      "semanticCommitScope": "docs",
+      "automerge": true,
+      "platformAutomerge": true
+    },
+    {
+      "description": "Major bumps of the docs stack (e.g. mkdocs-material N+1) need manual review",
+      "matchManagers": ["pip_requirements"],
+      "matchFileNames": ["docs/requirements.txt"],
+      "matchUpdateTypes": ["major"],
+      "groupName": "docs (mkdocs major)",
+      "semanticCommitScope": "docs",
+      "labels": ["dependencies", "docs"]
+    }
+  ]
+}
