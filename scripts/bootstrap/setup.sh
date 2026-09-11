@@ -56,24 +56,27 @@ detect_environment() {
   kernel="$(uname -r 2>/dev/null || printf 'unknown')"
 
   case "${uname_s}" in
-    Linux*)                os="linux" ;;
-    Darwin*)               os="macos" ;;
-    CYGWIN*|MINGW*|MSYS*)  os="windows" ;;
-    *BSD*|DragonFly*)      os="bsd" ;;
-    *)                     os="unknown" ;;
+    Linux*) os="linux" ;;
+    Darwin*) os="macos" ;;
+    CYGWIN* | MINGW* | MSYS*) os="windows" ;;
+    *BSD* | DragonFly*) os="bsd" ;;
+    *) os="unknown" ;;
   esac
 
   case "${uname_m}" in
-    x86_64|amd64)          arch="x86_64" ;;
-    aarch64|arm64)         arch="arm64" ;;
-    i386|i686)             arch="x86" ;;
-    *)                     arch="${uname_m}" ;;
+    x86_64 | amd64) arch="x86_64" ;;
+    aarch64 | arm64) arch="arm64" ;;
+    i386 | i686) arch="x86" ;;
+    *) arch="${uname_m}" ;;
   esac
 
   # Linux distro identification (best-effort; non-fatal).
   if [[ "${os}" == "linux" && -r /etc/os-release ]]; then
     # shellcheck disable=SC1091
-    distro="$( . /etc/os-release 2>/dev/null; printf '%s' "${ID:-}" )"
+    distro="$(
+      . /etc/os-release 2>/dev/null
+      printf '%s' "${ID:-}"
+    )"
   fi
 
   # WSL detection (kernel string carries the marker on WSL1/WSL2).
@@ -120,13 +123,13 @@ log "Required Python version (from tooling/.tool-versions): ${REQUIRED_PY_VERSIO
 # version_ge A B -> success if A >= B (numeric, dotted; no external deps)
 version_ge() {
   local -a a b
-  IFS='.' read -r -a a <<< "$1"
-  IFS='.' read -r -a b <<< "$2"
+  IFS='.' read -r -a a <<<"$1"
+  IFS='.' read -r -a b <<<"$2"
   local i
   for i in 0 1 2; do
     local x="${a[i]:-0}" y="${b[i]:-0}"
-    (( x > y )) && return 0
-    (( x < y )) && return 1
+    ((x > y)) && return 0
+    ((x < y)) && return 1
   done
   return 0
 }
