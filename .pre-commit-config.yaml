@@ -55,6 +55,8 @@ repos:
           - --fix=lf
       - id: check-yaml
         files: \.ya?ml$
+        args:
+          - --unsafe
       - id: check-json
         files: \.json$
       - id: check-toml

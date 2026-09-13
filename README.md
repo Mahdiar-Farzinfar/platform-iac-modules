@@ -10,6 +10,7 @@
 [![Code of Conduct](https://img.shields.io/badge/code%20of%20conduct-adopted-blue)](./CODE_OF_CONDUCT.md)
 [![Terraform](https://img.shields.io/badge/Terraform-supported-844FBA?logo=terraform&logoColor=white)](https://developer.hashicorp.com/terraform)
 [![Renovate](https://img.shields.io/badge/Renovate-enabled-1A1F6C?logo=renovatebot&logoColor=white)](./.github/renovate.json)
+[![Documentation](https://img.shields.io/badge/documentation-MkDocs-526CFE?logo=materialformkdocs&logoColor=white)](https://Mahdiar-Farzinfar.github.io/platform-iac-modules/)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Mahdiar-Farzinfar/platform-iac-modules/badge)](https://scorecard.dev/viewer/?uri=github.com/Mahdiar-Farzinfar/platform-iac-modules)
 
 > **Architecture Note:** This repository provides **stateless, reusable Terraform modules**. Do **not** run `terraform apply` directly from this repository. Environment composition, backend/state management, provider configuration, and deployment orchestration belong in a separate live infrastructure repository such as `platform-live-infra`.
@@ -32,7 +33,7 @@ This repository contains reusable, versioned, and security-focused Infrastructur
 - [Definition of Done](#definition-of-done)
 - [Validation and Quality Gates](#validation-and-quality-gates)
 - [Testing Strategy](#testing-strategy)
-- [Documentation Standards](#documentation-standards)
+- [Documentation](#documentation)
 - [Versioning and Releases](#versioning-and-releases)
 - [Deprecation Policy](#deprecation-policy)
 - [Security Posture](#security-posture)
@@ -111,6 +112,7 @@ platform-iac-modules/
 ├── .editorconfig
 ├── .pre-commit-config.yaml
 ├── .terraform-docs.yml
+├── mkdocs.yml
 ├── Taskfile.yml             # Canonical local automation entry point
 ├── justfile                 # Thin wrapper around Task targets for Just users
 ├── Makefile                 # Thin wrapper around Task targets for Make users
@@ -469,9 +471,16 @@ Testing should be pragmatic and proportional to module criticality.
 
 Modules such as `kms`, `cloudtrail`, `guardduty`, and `scp` should generally receive stronger test coverage because they impact foundational security and governance controls.
 
-## Documentation Standards
+## Documentation
 
-Every module should include a `README.md` that documents at minimum:
+The complete project documentation is available at:
+
+[Read the Platform IaC Modules documentation](https://Mahdiar-Farzinfar.github.io/platform-iac-modules/)
+
+The documentation covers module usage, development standards, security requirements,
+versioning, and cross-platform workflows.
+
+Every module should include a `README.md` that documents, at minimum:
 
 - Purpose and use cases
 - Inputs and outputs
@@ -479,14 +488,14 @@ Every module should include a `README.md` that documents at minimum:
 - Dependencies and assumptions
 - Security considerations
 - Known limitations
-- Upgrade or migration notes when relevant
+- Upgrade or migration notes, when applicable
 
-Repository-wide guidance is available in:
+Repository-wide guidance is also available in the following documents:
 
-- `docs/module-development.md`
-- `docs/security-baseline.md`
-- `docs/versioning.md`
-- `docs/cross-platform.md`
+- [Module Development Guide](docs/module-development.md)
+- [Security Baseline](docs/security-baseline.md)
+- [Versioning Guide](docs/versioning.md)
+- [Cross-Platform Guide](docs/cross-platform.md)
 
 ## Versioning and Releases
 
