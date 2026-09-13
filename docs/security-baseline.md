@@ -3,16 +3,18 @@
 This document defines the security expectations for
 `platform-iac-modules`. It is an engineering baseline for module authors,
 reviewers, and consumers; it does not replace the vulnerability-reporting
-process in [`SECURITY.md`](../SECURITY.md).
+process in [`SECURITY.md](https://github.com/Mahdiar-Farzinfar/platform-iac-modules/blob/main/SECURITY.md).
 
 ## Scope and repository boundaries
 
 The baseline applies to:
 
-- Terraform modules under [`modules/`](../modules/), including their examples,
+- Terraform modules under [`modules/`](https://github.com/Mahdiar-Farzinfar/platform-iac-modules/tree/main/modules/), including their examples,
   native tests, and integration tests.
-- Repository automation under [`scripts/`](../scripts/), [`tests/`](../tests/),
-  [`Taskfile.yml`](../Taskfile.yml), and the wrapper task files.
+- Repository automation under [`scripts/`](https://github.com/Mahdiar-Farzinfar/platform-iac-modules/tree/main/scripts/),
+[`tests/`](https://github.com/Mahdiar-Farzinfar/platform-iac-modules/tree/main/tests/),
+[`Taskfile.yml`](https://github.com/Mahdiar-Farzinfar/platform-iac-modules/blob/main/Taskfile.yml),
+and the wrapper task files.
 - GitHub Actions workflows, dependency configuration, tool configuration, and
   documentation.
 
@@ -35,7 +37,8 @@ The module catalog currently contains:
 | `scp` | AWS Organizations preventive guardrails |
 
 The authoritative inventory is
-[`catalog/modules.yaml`](../catalog/modules.yaml), and each module README is
+[`catalog/modules.yaml`](https://github.com/Mahdiar-Farzinfar/platform-iac-modules/blob/main/catalog/modules.yaml),
+and each module README is
 the source of truth for its exact interface, prerequisites, defaults, and
 limitations.
 
@@ -240,7 +243,8 @@ relationships, or security design. Handle them as sensitive operational data.
 - Do not place raw policy documents, tokens, or secret values in outputs when an
   ARN, ID, name, or boolean is sufficient.
 - Review outputs after changes with
-  [`scripts/tools/validate-outputs.py`](../scripts/tools/validate-outputs.py)
+  [`scripts/tools/validate-outputs.py`](https://github.com/Mahdiar-Farzinfar/platform-iac-modules/blob/main/scripts/tools/validate-outputs.py)
+
   and check that generated CI output cannot be interpreted as shell or workflow
   input.
 - Redact account-specific values and sensitive plan details from issue reports,
@@ -248,7 +252,7 @@ relationships, or security design. Handle them as sensitive operational data.
 
 ## CI, validation, and security gates
 
-The repository's canonical automation entry point is [`Taskfile.yml`](../Taskfile.yml).
+The repository's canonical automation entry point is [`Taskfile.yml`](https://github.com/Mahdiar-Farzinfar/platform-iac-modules/blob/main/Taskfile.yml).
 `Makefile` and `justfile` are convenience wrappers. Run the narrowest relevant
 checks during development and the complete applicable gate before review.
 
@@ -261,10 +265,10 @@ checks include:
 - toolchain and environment verification;
 - Terraform formatting, backend-disabled initialization, validation, and native
   `*.tftest.hcl` tests;
-- TFLint using [`tooling/.tflint.hcl`](../tooling/.tflint.hcl);
+- TFLint using [`tooling/.tflint.hcl`](https://github.com/Mahdiar-Farzinfar/platform-iac-modules/blob/main/tooling/.tflint.hcl);
 - Go formatting, vetting, linting, and tests where Go code exists;
 - Markdown, YAML, and GitHub Actions linting;
-- generated documentation checks using [`.terraform-docs.yml`](../.terraform-docs.yml);
+- generated documentation checks using [`.terraform-docs.yml`](https://github.com/Mahdiar-Farzinfar/platform-iac-modules/blob/main/.terraform-docs.yml);
 - repository smoke and cross-platform checks where selected by the workflow.
 
 The workflow expects deterministic provider resolution and validates module
@@ -277,7 +281,8 @@ that a consumer's account, organization, or runtime configuration is safe.
 and on a weekly schedule. It uses least-privilege job permissions and runs:
 
 - **Checkov:** Terraform scanning with
-  [`tooling/.checkov.yml`](../tooling/.checkov.yml). The SARIF pass is
+  [`tooling/.checkov.yml`](https://github.com/Mahdiar-Farzinfar/platform-iac-modules/blob/main/tooling/.checkov.yml).
+  The SARIF pass is
   soft-fail for report collection; the enforcing CLI pass is not soft-fail.
   No global `skip-check` entries are configured.
 - **Trivy:** IaC and filesystem scanning for HIGH and CRITICAL findings, with
@@ -290,7 +295,8 @@ and on a weekly schedule. It uses least-privilege job permissions and runs:
 
 Locally, `task security:all` runs Checkov, Trivy, and Gitleaks. Local Trivy
 includes MEDIUM findings and uses
-[`tooling/.trivyignore`](../tooling/.trivyignore). Any exception must be narrow,
+[`tooling/.trivyignore`](https://github.com/Mahdiar-Farzinfar/platform-iac-modules/blob/main/tooling/.trivyignore).
+Any exception must be narrow,
 reviewed, and documented with an owner, rationale, expiry date, and tracking
 reference. Do not use scanner exclusions to hide production IaC.
 
@@ -303,7 +309,7 @@ development-container changes as supply-chain security changes.
 
 ## Review and release controls
 
-All paths are routed through [`CODEOWNERS`](../CODEOWNERS), currently to
+All paths are routed through [`CODEOWNERS`](https://github.com/Mahdiar-Farzinfar/platform-iac-modules/blob/main/CODEOWNERS), currently to
 `@Mahdiar-Farzinfar`. Reviewers should require additional evidence for changes
 to:
 
@@ -332,7 +338,8 @@ Modules are released independently with immutable tags in the form
 module README and release notes, and promote changes through a lower-risk
 environment before production.
 
-Per [`SECURITY.md`](../SECURITY.md), security fixes are guaranteed only for the
+Per [`SECURITY.md`](https://github.com/Mahdiar-Farzinfar/platform-iac-modules/blob/main/SECURITY.md),
+security fixes are guaranteed only for the
 latest release of the affected release domain. Report vulnerabilities privately
 through GitHub's private vulnerability reporting; do not open a public issue.
 

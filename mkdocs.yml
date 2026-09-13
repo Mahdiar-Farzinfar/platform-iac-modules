@@ -69,11 +69,9 @@ nav:
       - Versioning & Releases: versioning.md
       - Cross-Platform Tooling: cross-platform.md
 
-# docs/README.md is a directory-level readme for GitHub, not a site page.
-not_in_nav: |
-  README.md
-
 exclude_docs: |
+  # Directory-level readme for GitHub; conflicts with docs/index.md in MkDocs.
+  README.md
   drafts/
 
 validation:

@@ -49,7 +49,7 @@ production module reference.
 
 ## Support policy
 
-Per [`SECURITY.md`](../SECURITY.md), security fixes are guaranteed only for the
+Per [`SECURITY.md`](https://github.com/Mahdiar-Farzinfar/platform-iac-modules/blob/main/SECURITY.md), security fixes are guaranteed only for the
 latest released version of the affected release domain:
 
 - the latest `module/<module-name>/vX.Y.Z` for a module;
@@ -174,10 +174,10 @@ behavior or compatibility is a breaking change for the affected module.
 
 Use these files as the authoritative toolchain sources:
 
-- [`tooling/.terraform-version`](../tooling/.terraform-version) for Terraform;
-- [`tooling/.tool-versions`](../tooling/.tool-versions) for shared tools;
-- [`go.mod`](../go.mod) for Go;
-- [`tooling/cross-platform/asdf-tool-versions`](../tooling/cross-platform/asdf-tool-versions)
+- [`tooling/.terraform-version`](https://github.com/Mahdiar-Farzinfar/platform-iac-modules/blob/main/tooling/.terraform-version) for Terraform;
+- [`tooling/.tool-versions`](https://github.com/Mahdiar-Farzinfar/platform-iac-modules/blob/main/tooling/.tool-versions) for shared tools;
+- [`go.mod`](https://github.com/Mahdiar-Farzinfar/platform-iac-modules/blob/main/go.mod) for Go;
+- [`tooling/cross-platform/asdf-tool-versions`](https://github.com/Mahdiar-Farzinfar/platform-iac-modules/blob/main/tooling/cross-platform/asdf-tool-versions)
   for the cross-platform mirror.
 
 Run `task verify:toolchain` when changing version sources or mirrors. The
@@ -185,7 +185,7 @@ machine-readable catalog is an inventory and automation aid; it is not the
 authoritative source for module constraints or release tags.
 
 Renovate manages dependency update proposals using
-[`.github/renovate.json`](../.github/renovate.json). Security updates receive
+[`.github/renovate.json`](https://github.com/Mahdiar-Farzinfar/platform-iac-modules/blob/main/.github/renovate.json). Security updates receive
 priority, while major Terraform/provider and toolchain updates require
 deliberate compatibility review. Keep action references, scanner versions,
 provider constraints, and toolchain pins aligned with the checks run by CI.
@@ -258,20 +258,21 @@ Before merging a release-relevant change:
 
 Use these files for current behavior:
 
-- [`README.md`](../README.md), especially its Versioning and Releases section;
-- [`CONTRIBUTING.md`](../CONTRIBUTING.md), for commit and compatibility policy;
-- [`SECURITY.md`](../SECURITY.md), for supported release-domain versions;
-- [`.github/workflows/release.yml`](../.github/workflows/release.yml), for
+- [`README.md`](https://github.com/Mahdiar-Farzinfar/platform-iac-modules/blob/main/README.md), especially its Versioning and Releases section;
+- [`CONTRIBUTING.md`](https://github.com/Mahdiar-Farzinfar/platform-iac-modules/blob/main/CONTRIBUTING.md), for commit and compatibility policy;
+- [`SECURITY.md`](https://github.com/Mahdiar-Farzinfar/platform-iac-modules/blob/main/SECURITY.md), for supported release-domain versions;
+- [`.github/workflows/release.yml`](https://github.com/Mahdiar-Farzinfar/platform-iac-modules/blob/main/.github/workflows/release.yml), for
   domain detection, bump calculation, tag creation, and changelog automation;
-- [`.github/renovate.json`](../.github/renovate.json), for dependency-update
+- [`.github/renovate.json`](https://github.com/Mahdiar-Farzinfar/platform-iac-modules/blob/main/.github/renovate.json), for dependency-update
   policy;
-- each module's [`versions.tf`](../modules/), for executable compatibility
-  constraints;
-- [`.terraform-docs.yml`](../.terraform-docs.yml), for generated module
+- each module's `versions.tf` file under
+  [`modules/`](https://github.com/Mahdiar-Farzinfar/platform-iac-modules/tree/main/modules),
+  for executable compatibility constraints;
+- [`.terraform-docs.yml`](https://github.com/Mahdiar-Farzinfar/platform-iac-modules/blob/main/.terraform-docs.yml), for generated module
   documentation;
-- [`catalog/modules.yaml`](../catalog/modules.yaml), for module inventory and
+- [`catalog/modules.yaml`](https://github.com/Mahdiar-Farzinfar/platform-iac-modules/blob/main/catalog/modules.yaml), for module inventory and
   metadata;
-- [`Taskfile.yml`](../Taskfile.yml), for local validation and release checks.
+- [`Taskfile.yml`](https://github.com/Mahdiar-Farzinfar/platform-iac-modules/blob/main/Taskfile.yml), for local validation and release checks.
 
 If implementation and documentation diverge, follow the enforced workflow and
 module files first, then update this document in the same change.
