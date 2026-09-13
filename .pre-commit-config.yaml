@@ -137,11 +137,10 @@ repos:
             import subprocess
             import sys
 
-            def run_git(*args, input_text=None):
+            def run_git(*args, input_bytes=None):
                 return subprocess.run(
                     ["git", *args],
-                    input=input_text,
-                    text=True,
+                    input=input_bytes,
                     capture_output=True,
                     check=False,
                 )
@@ -151,39 +150,41 @@ repos:
                 "--cached",
                 "--name-only",
                 "--diff-filter=ACMR",
+                "-z",
             )
             if staged_result.returncode not in (0, 1):
-                sys.stderr.write(staged_result.stderr)
+                sys.stderr.buffer.write(staged_result.stderr)
                 raise SystemExit(staged_result.returncode)
 
             staged_files = [
-                line.strip()
-                for line in staged_result.stdout.splitlines()
-                if line.strip()
+                path
+                for path in staged_result.stdout.split(b"\0")
+                if path
             ]
             if not staged_files:
                 raise SystemExit(0)
 
             ignored_result = run_git(
                 "check-ignore",
+                "-z",
                 "--stdin",
-                input_text="\n".join(staged_files) + "\n",
-            )
+                input_bytes=b"\0".join(staged_files) + b"\0",            )
             if ignored_result.returncode not in (0, 1):
-                sys.stderr.write(ignored_result.stderr)
+                sys.stderr.buffer.write(ignored_result.stderr)
                 raise SystemExit(ignored_result.returncode)
 
             ignored_files = [
-                line.strip()
-                for line in ignored_result.stdout.splitlines()
-                if line.strip()
+                path
+                for path in ignored_result.stdout.split(b"\0")
+                if path
             ]
             if not ignored_files:
                 raise SystemExit(0)
 
             print("ERROR: The following staged files are ignored by .gitignore:")
             for path in ignored_files:
-                print(f"  - {path}")
+                display_path = path.decode("utf-8", errors="replace")
+                print(f"  - {display_path}")
             print()
             print("Fix:")
             print("  - Unstage/remove them, or")
