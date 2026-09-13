@@ -1,0 +1,27 @@
+{
+  "recommendations": [
+    "hashicorp.terraform",
+
+    "golang.go",
+    "ms-python.python",
+    "ms-python.vscode-pylance",
+
+    "redhat.vscode-yaml",
+
+    "ms-vscode-remote.remote-containers",
+    "ms-azuretools.vscode-docker",
+
+    "ms-vscode.powershell",
+    "timonwong.shellcheck",
+    "foxundermoon.shell-format",
+
+    "yzhang.markdown-all-in-one",
+    "davidanson.vscode-markdownlint",
+
+    "eamodio.gitlens",
+    "github.vscode-pull-request-github",
+
+    "streetsidesoftware.code-spell-checker",
+    "gruntfuggly.todo-tree"
+  ]
+}
