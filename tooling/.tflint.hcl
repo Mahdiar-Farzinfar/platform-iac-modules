@@ -70,8 +70,11 @@ rule "terraform_documented_outputs" {
 }
 
 # Structure consistency across modules
+# Intentionally disabled for now because this repository currently permits
+# variables/outputs in main.tf across existing module examples.
+# Re-enable only after repository-wide structure and documentation alignment.
 rule "terraform_standard_module_structure" {
-  enabled  = true
+  enabled  = false
 }
 
 # Optional style signal (keep as warning to reduce friction)
