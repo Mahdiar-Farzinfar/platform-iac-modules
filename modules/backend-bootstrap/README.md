@@ -146,7 +146,7 @@ Alternatively, consume the `backend_config` output map with
 
 | Name | Version |
 |------|---------|
-| <a name="provider_aws"></a> [aws](#provider\_aws) | 6.64.0 |
+| <a name="provider_aws"></a> [aws](#provider\_aws) | >= 5.70.0, < 7.0.0 |
 
 
 
