@@ -33,6 +33,7 @@ data "aws_caller_identity" "current" {}
 # State Bucket
 # -----------------------------------------------------------------------------
 resource "aws_s3_bucket" "state" {
+  #checkov:skip=CKV_AWS_144:Cross-region replication requires a destination provider and bucket outside this bootstrap module.
   bucket        = local.state_bucket_name
   force_destroy = var.force_destroy
 
@@ -45,6 +46,11 @@ resource "aws_s3_bucket" "state" {
     # Guard rail: state bucket must never be destroyed accidentally.
     prevent_destroy = true
   }
+}
+
+resource "aws_s3_bucket_notification" "state" {
+  bucket      = aws_s3_bucket.state.id
+  eventbridge = true
 }
 
 resource "aws_s3_bucket_versioning" "state" {
@@ -121,6 +127,12 @@ data "aws_iam_policy_document" "state" {
       "${aws_s3_bucket.state.arn}/*",
     ]
 
+    condition {
+      test     = "StringEquals"
+      variable = "kms:CallerAccount"
+      values   = [data.aws_caller_identity.current.account_id]
+    }
+
     principals {
       type        = "*"
       identifiers = ["*"]
@@ -182,6 +194,9 @@ resource "aws_s3_bucket_policy" "state" {
 # Optional: Access Logs Bucket
 # -----------------------------------------------------------------------------
 resource "aws_s3_bucket" "access_logs" {
+  #checkov:skip=CKV_AWS_18:Access-log destination buckets cannot enable server access logging to themselves.
+  #checkov:skip=CKV_AWS_144:Access-log destination bucket is intentionally regional and is not replicated by this module.
+  #checkov:skip=CKV_AWS_145:S3 server access log delivery requires SSE-S3 (AES256); SSE-KMS is unsupported.
   count = var.enable_access_logging ? 1 : 0
 
   bucket        = local.access_logs_bucket_name
@@ -193,21 +208,39 @@ resource "aws_s3_bucket" "access_logs" {
   })
 }
 
+resource "aws_s3_bucket_notification" "access_logs" {
+  count       = var.enable_access_logging ? 1 : 0
+  bucket      = aws_s3_bucket.access_logs[count.index].id
+  eventbridge = true
+}
+
 resource "aws_s3_bucket_public_access_block" "access_logs" {
   count = var.enable_access_logging ? 1 : 0
 
-  bucket = aws_s3_bucket.access_logs[0].id
+  bucket = aws_s3_bucket.access_logs[count.index].id
 
   block_public_acls       = true
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
+  depends_on              = [aws_s3_bucket.access_logs]
 }
 
+resource "aws_s3_bucket_versioning" "access_logs" {
+  count = var.enable_access_logging ? 1 : 0
+
+  bucket = aws_s3_bucket.access_logs[count.index].id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+#trivy:ignore:aws-s3-encryption-customer-key
 resource "aws_s3_bucket_server_side_encryption_configuration" "access_logs" {
   count = var.enable_access_logging ? 1 : 0
 
-  bucket = aws_s3_bucket.access_logs[0].id
+  bucket = aws_s3_bucket.access_logs[count.index].id
 
   rule {
     apply_server_side_encryption_by_default {
@@ -220,13 +253,19 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "access_logs" {
 resource "aws_s3_bucket_lifecycle_configuration" "access_logs" {
   count = var.enable_access_logging ? 1 : 0
 
-  bucket = aws_s3_bucket.access_logs[0].id
+  bucket = aws_s3_bucket.access_logs[count.index].id
+
+  depends_on = [aws_s3_bucket_versioning.access_logs]
 
   rule {
     id     = "expire-access-logs"
     status = "Enabled"
 
     filter {}
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
 
     expiration {
       days = var.access_logs_retention_days
@@ -238,7 +277,7 @@ resource "aws_s3_bucket_logging" "state" {
   count = var.enable_access_logging ? 1 : 0
 
   bucket        = aws_s3_bucket.state.id
-  target_bucket = aws_s3_bucket.access_logs[0].id
+  target_bucket = aws_s3_bucket.access_logs[count.index].id
   target_prefix = "state-bucket/"
 }
 

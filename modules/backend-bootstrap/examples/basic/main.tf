@@ -70,10 +70,38 @@ provider "aws" {
 # The module's bucket policy denies writes encrypted with any other key, and
 # its `kms_key_arn` validation requires the canonical key ARN (no aliases).
 # -----------------------------------------------------------------------------
+data "aws_caller_identity" "current" {}
+
+data "aws_partition" "current" {}
+
+data "aws_iam_policy_document" "terraform_state_kms" {
+  #checkov:skip=CKV_AWS_109:KMS key policy must use Resource=* (means this key only); account root kms:* is required so IAM policies can govern key access
+  #checkov:skip=CKV_AWS_111:KMS key policy Resource=* is an AWS constraint, not unconstrained IAM write access
+  #checkov:skip=CKV_AWS_356:KMS key policies only allow Resource=*; it cannot target other resources
+
+  statement {
+    sid    = "EnableAccountIAMPermissions"
+    effect = "Allow"
+
+    actions = ["kms:*"]
+
+    # In a KMS key policy, "*" means only the key this policy is attached to.
+    resources = ["*"]
+
+    principals {
+      type = "AWS"
+      identifiers = [
+        "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:root"
+      ]
+    }
+  }
+}
+
 resource "aws_kms_key" "terraform_state" {
   description             = "Encrypts Terraform remote state (S3) and the lock table (DynamoDB)."
   enable_key_rotation     = true
   deletion_window_in_days = 30
+  policy                  = data.aws_iam_policy_document.terraform_state_kms.json
 }
 
 resource "aws_kms_alias" "terraform_state" {
