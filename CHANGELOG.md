@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## module/scp v0.1.0
+
+### Changed
+- feat(scp): add scp module (#84) (186cb76)
+
 ## module/log-archive-bucket v0.1.0
 
 ### Changed
