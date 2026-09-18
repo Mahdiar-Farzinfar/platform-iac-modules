@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## module/log-archive-bucket v0.1.0
+
+### Changed
+- feat(log-archive-bucket): add log archive bucket module (#81) (7b16823)
+
 ## module/kms v0.1.0
 
 ### Changed
