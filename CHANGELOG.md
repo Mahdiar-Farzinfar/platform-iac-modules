@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## module/guardduty v0.1.0
+
+### Changed
+- feat(guardduty): add guardduty module (#75) (79bd612)
+
 ## module/github-oidc v0.1.0
 
 ### Changed
