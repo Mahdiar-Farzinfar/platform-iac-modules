@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## module/kms v0.1.0
+
+### Changed
+- feat(kms): add kms module (#78) (aa0c8c2)
+
 ## module/guardduty v0.1.0
 
 ### Changed
