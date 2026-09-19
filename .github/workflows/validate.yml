@@ -697,7 +697,19 @@ jobs:
         run: tflint --config "${GITHUB_WORKSPACE}/${{ env.TFLINT_CONFIG }}"
 
       - name: Terraform Docs check (In-place check)
-        run: terraform-docs --config "${GITHUB_WORKSPACE}/.terraform-docs.yml" . --check
+        env:
+          MODULE_PATH: ${{ matrix.path }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "${MODULE_PATH}" =~ ^modules/[a-zA-Z0-9_-]+$ ]]; then
+            echo "::error::Terraform documentation checks require a module root under modules/."
+            exit 1
+          fi
+
+          terraform-docs markdown table --config "${GITHUB_WORKSPACE}/.terraform-docs.yml" \
+            --recursive=false --output-file README.md --output-mode inject \
+            --output-check .
 
       - name: Upload Lockfile for analysis
         if: always()

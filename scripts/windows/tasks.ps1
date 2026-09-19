@@ -273,7 +273,19 @@ function Invoke-DocsGenerate {
     Assert-RequiredParam -Name 'TerraformDocsConfig' -Value $TerraformDocsConfig
 
     Assert-PathExists -Path $TerraformDocsConfig -Label 'terraform-docs config'
-    $moduleDirs = @(Get-TerraformModuleDirs -ModulesDir $ModulesDir)
+    Assert-PathExists -Path $ModulesDir -Label 'modules directory'
+    $moduleDirs = @(
+        Get-ChildItem -LiteralPath $ModulesDir -Directory |
+            Where-Object {
+                $terraformFiles = @(
+                    Get-ChildItem -LiteralPath $_.FullName -Filter '*.tf' -File |
+                        Select-Object -First 1
+                )
+                $terraformFiles.Count -gt 0
+            } |
+            Select-Object -ExpandProperty FullName |
+            Sort-Object
+    )
     if ($moduleDirs.Count -eq 0) {
         Write-Host "No Terraform modules found under $ModulesDir"
         return

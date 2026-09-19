@@ -469,12 +469,19 @@ tasks:
           echo "Skipping terraform-docs: modules directory not found at {{.MODULES_DIR}}"
           exit 0
         fi
-        find "{{.MODULES_DIR}}" -type f -name 'main.tf' ! -path '*/.terraform/*' -printf '%h\n' \
-          | sort -u \
-          | while IFS= read -r module_path; do
-              echo "==> terraform-docs: ${module_path}"
-              terraform-docs markdown table --config "{{.ROOT_DIR}}/.terraform-docs.yml" --output-file README.md --output-mode inject "${module_path}"
-            done
+        for module_path in "{{.MODULES_DIR}}"/*; do
+          [ -d "$module_path" ] || continue
+          has_terraform=false
+          for terraform_file in "$module_path"/*.tf; do
+            if [ -f "$terraform_file" ]; then
+              has_terraform=true
+              break
+            fi
+          done
+          [ "$has_terraform" = true ] || continue
+          echo "==> terraform-docs: ${module_path}"
+          terraform-docs markdown table --config "{{.ROOT_DIR}}/.terraform-docs.yml" --recursive=false --output-file README.md --output-mode inject "${module_path}"
+        done
 
   docs:check:
     desc: Ensure docs are up-to-date (fails if git diff exists)

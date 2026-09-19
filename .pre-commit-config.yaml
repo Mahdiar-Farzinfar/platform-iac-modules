@@ -102,9 +102,10 @@ repos:
         files: ^modules/.*\.(tf|hcl)$
 
       - id: terraform_docs
-        files: ^modules/[^/]+/(README\.md|main\.tf|variables\.tf|outputs\.tf|versions\.tf|locals\.tf)$
+        files: ^modules/[^/]+/(README\.md|[^/]+\.tf)$
         args:
           - --args=--config=.terraform-docs.yml
+          - --args=--recursive=false
 
   - repo: https://github.com/shellcheck-py/shellcheck-py
     rev: v0.10.0.1

@@ -119,19 +119,17 @@ jobs:
       - name: "Generate documentation"
         run: |
           set -euo pipefail
-          # Uses repo-root .terraform-docs.yml as configuration SoT.
-          # Adjust paths only if your modules layout differs.
+          # Generate documentation only for module roots directly under modules/.
+          # Use repo-root configuration with recursive generation disabled.
           if [[ -d modules ]]; then
             while IFS= read -r -d '' module_dir; do
-              echo "Generating docs for: ${module_dir}"
+              if [[ -z "$(find "${module_dir}" -maxdepth 1 -type f -name '*.tf' -print -quit)" ]]; then
+                continue
+              fi
+            echo "Generating docs for: ${module_dir}"
               command -v terraform-docs >/dev/null
-              terraform-docs markdown table --config ".terraform-docs.yml" --output-file README.md --output-mode inject "${module_dir}"
-            done < <(find modules -mindepth 1 -maxdepth 3 -type d -print0)
-          fi
-
-          if compgen -G "*.tf" > /dev/null; then
-            echo "Generating docs for repository root"
-            terraform-docs markdown table --config ".terraform-docs.yml" --output-file README.md --output-mode inject .
+              terraform-docs markdown table --config ".terraform-docs.yml" --recursive=false --output-file README.md --output-mode inject "${module_dir}"
+            done < <(find modules -mindepth 1 -maxdepth 1 -type d -print0)
           fi
 
       - name: "Detect documentation drift"
@@ -238,17 +236,17 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Generate documentation only for module roots directly under modules/.
+          # Use repo-root configuration with recursive generation disabled.
           if [[ -d modules ]]; then
             while IFS= read -r -d '' module_dir; do
-              echo "Generating docs for: ${module_dir}"
+              if [[ -z "$(find "${module_dir}" -maxdepth 1 -type f -name '*.tf' -print -quit)" ]]; then
+                continue
+              fi
+            echo "Generating docs for: ${module_dir}"
               command -v terraform-docs >/dev/null
-              terraform-docs markdown table --config ".terraform-docs.yml" --output-file README.md --output-mode inject "${module_dir}"
-            done < <(find modules -mindepth 1 -maxdepth 3 -type d -print0)
-          fi
-
-          if compgen -G "*.tf" > /dev/null; then
-            echo "Generating docs for repository root"
-            terraform-docs markdown table --config ".terraform-docs.yml" --output-file README.md --output-mode inject .
+              terraform-docs markdown table --config ".terraform-docs.yml" --recursive=false --output-file README.md --output-mode inject "${module_dir}"
+            done < <(find modules -mindepth 1 -maxdepth 1 -type d -print0)
           fi
 
       - name: "Create pull request for generated docs"
