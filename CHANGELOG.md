@@ -31,4 +31,3 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - feat(cloudtrail): add organization trail module (#69) (8085f0f)
-
