@@ -561,9 +561,12 @@ tasks:
             echo "Skipping go test: modules directory not found at {{.MODULES_DIR}}"
             exit 0
           fi
+          if [ "${RUN_INTEGRATION_TESTS:-false}" != "true" ]; then
+            echo "Skipping AWS integration tests: set RUN_INTEGRATION_TESTS=true after configuring AWS."
+            exit 0
+          fi
           dirs=$(
             find "{{.MODULES_DIR}}" -type f -name "integration_test.go" -exec dirname {} \; 2>/dev/null |
-            xargs -I{} dirname {} |
             sort -u
           )
 

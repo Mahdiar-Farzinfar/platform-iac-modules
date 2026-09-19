@@ -296,6 +296,7 @@ function Invoke-DocsGenerate {
         Invoke-Native {
             terraform-docs markdown table `
                 --config $TerraformDocsConfig `
+                --recursive=false `
                 --output-file README.md `
                 --output-mode inject `
                 $modulePath
@@ -349,34 +350,41 @@ function Invoke-TestGo {
     Assert-RequiredParam -Name 'ModulesDir' -Value $ModulesDir
     Assert-RequiredParam -Name 'Timeout' -Value $Timeout
 
-    $files = @(
-        Get-ChildItem -LiteralPath $ModulesDir -Recurse -Filter 'integration-test.go' -File -ErrorAction SilentlyContinue
-    )
-    if ($files.Count -eq 0) {
-        Write-Host 'No integration-test.go files found. Skipping go test.'
+    if ($env:RUN_INTEGRATION_TESTS -cne 'true') {
+        Write-Host 'Skipping AWS integration tests: set RUN_INTEGRATION_TESTS=true after configuring AWS.'
         return
     }
 
-    $rootResolved = (Resolve-Path -LiteralPath $RootDir).Path.TrimEnd('\', '/')
+    Assert-PathExists -Path $RootDir -Label 'repository root'
+    Assert-PathExists -Path $ModulesDir -Label 'modules directory'
+
+    $files = @(
+        Get-ChildItem -LiteralPath $ModulesDir -Recurse -Filter 'integration_test.go' -File |
+            Where-Object { $_.FullName -notmatch '[\\/](vendor|\.terraform|\.git)[\\/]' }
+    )
+    if ($files.Count -eq 0) {
+        Write-Host 'No integration_test.go files found. Skipping go test.'
+        return
+    }
+
     $dirs = @(
         $files |
-            ForEach-Object { Split-Path -Parent $_.DirectoryName } |
+            Select-Object -ExpandProperty DirectoryName |
             Sort-Object -Unique
     )
 
     Write-Host '==> running go test for module integration tests'
 
     foreach ($d in $dirs) {
-        $full = (Resolve-Path -LiteralPath $d).Path
-        $rel = $full
-        if ($full.StartsWith($rootResolved, [System.StringComparison]::OrdinalIgnoreCase)) {
-            $rel = $full.Substring($rootResolved.Length).TrimStart('\', '/')
+        Write-Host ("==> go test: " + $d)
+        Push-Location -LiteralPath $d
+        try {
+            Invoke-Native {
+                go test . -count=1 -timeout $Timeout -v
+            }
         }
-        $pkg = './' + ($rel -replace '\\', '/')
-
-        Write-Host ("==> go test: " + $pkg)
-        Invoke-Native {
-            go test $pkg -count=1 -timeout $Timeout -v
+        finally {
+            Pop-Location
         }
     }
 }
