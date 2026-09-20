@@ -1,0 +1,15 @@
+title = "platform-iac-modules gitleaks configuration"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Ignore local dependency, cache, and generated build directories"
+paths = [
+  '''(^|[\\/])\.venv([\\/]|$)''',
+  '''(^|[\\/])\.terraform([\\/]|$)''',
+  '''(^|[\\/])\.terragrunt-cache([\\/]|$)''',
+  '''(^|[\\/])vendor([\\/]|$)''',
+  '''(^|[\\/])(bin|dist|build|coverage)([\\/]|$)''',
+  '''(^|[\\/])node_modules([\\/]|$)''',
+]

@@ -48,6 +48,7 @@ tasks:
   # -----------------------------
   preflight:
     desc: Verify environment and required tools
+    run: once
     cmds:
       - >-
         {{if .IS_WINDOWS}}python{{else}}python3{{end}} -c
@@ -81,10 +82,12 @@ tasks:
 
   verify:toolchain:
     desc: Verify canonical toolchain versions and compatibility mirrors
+    run: once
     deps:
       - verify:toolchain:script
 
   verify:toolchain:script:
+    run: once
     internal: true
     cmds:
       - |
@@ -100,10 +103,12 @@ tasks:
 
   verify:outputs:
     desc: Validate output patterns to prevent injection (Sanitization)
+    run: once
     deps:
       - verify:outputs:script
 
   verify:outputs:script:
+    run: once
     internal: true
     cmds:
       - |
@@ -143,6 +148,7 @@ tasks:
 
   init:
     desc: Initialize Terraform working directories for all modules
+    run: once
     deps: [preflight]
     cmds:
       - task: init:windows
@@ -150,12 +156,14 @@ tasks:
 
   init:windows:
     internal: true
+    run: once
     platforms: [windows]
     cmds:
       - powershell -NoProfile -ExecutionPolicy Bypass -File "{{.WINDOWS_TASKS_SCRIPT}}" -Task init -ModulesDir "{{.MODULES_DIR}}"
 
   init:posix:
     internal: true
+    run: once
     platforms: [linux, darwin]
     cmds:
       - |
@@ -163,6 +171,10 @@ tasks:
         if [ ! -d "{{.MODULES_DIR}}" ]; then
           echo "Skipping terraform init: modules directory not found at {{.MODULES_DIR}}"
           exit 0
+        fi
+        init_flags="-backend=false -input=false"
+        if [ "{{.UPGRADE | default \"0\"}}" = "1" ]; then
+          init_flags="${init_flags} -upgrade"
         fi
         modules_dir='{{.MODULES_DIR}}'
         tmpfile="$(mktemp)"
@@ -172,7 +184,8 @@ tasks:
         while IFS= read -r module_path; do
           [ -n "$module_path" ] || continue
           echo "==> terraform init: ${module_path}"
-          terraform -chdir="${module_path}" init -backend=false -upgrade
+          # shellcheck disable=SC2086
+          terraform -chdir="${module_path}" init ${init_flags}
         done < "$tmpfile"
 
   # -----------------------------
@@ -343,7 +356,7 @@ tasks:
           echo "Skipping tflint: modules directory not found at {{.MODULES_DIR}}"
           exit 0
         fi
-        find "{{.MODULES_DIR}}" -type f -name 'main.tf' ! -path '*/.terraform/*' -printf '%h\n' \
+        find "{{.MODULES_DIR}}" -type f -name 'main.tf' ! -path '*/.terraform/*' -exec dirname {} \; \
           | sort -u \
           | while IFS= read -r module_path; do
               echo "==> tflint: ${module_path}"
@@ -366,7 +379,7 @@ tasks:
     desc: Lint YAML files
     deps: [preflight]
     cmds:
-      - python -m yamllint -c tooling/.yamllint.yml .
+      - '{{if .IS_WINDOWS}}python{{else}}python3{{end}} -m yamllint -c "{{.TOOLING_DIR}}/.yamllint.yml" .'
 
   lint:md:
     desc: Lint Markdown files
@@ -438,7 +451,7 @@ tasks:
   security:gitleaks:
     desc: Run secrets scan using gitleaks
     cmds:
-      - gitleaks detect --verbose --source "{{.ROOT_DIR}}" --no-git
+      - gitleaks detect --verbose --source "{{.ROOT_DIR}}" --no-git --config "{{.ROOT_DIR}}/tooling/.gitleaks.toml"
 
   security:all:
     desc: Run all security scans (Checkov  Trivy  Gitleaks)
@@ -543,7 +556,7 @@ tasks:
               test_file="$(find "${module_path}/tests" -maxdepth 1 -type f -name '*.tftest.hcl' -print -quit 2>/dev/null || true)"
               if [ -n "${test_file}" ]; then
                 echo "==> terraform test: ${module_path}"
-                terraform -chdir="${module_path}" test
+                terraform -chdir="${module_path}" test -input=false
               fi
             done
 
@@ -649,6 +662,7 @@ tasks:
       Intended for Validate / non-security workflows; security stays in a dedicated pipeline.
     cmds:
       - task: preflight
+      - task: init
       - task: ci:non-security:gates
 
   ci:non-security:gates:
@@ -665,6 +679,7 @@ tasks:
     desc: CI-equivalent checks (no auto-fix)
     deps:
       - preflight
+      - init
       - ci:changed
       - lint
       - security:all

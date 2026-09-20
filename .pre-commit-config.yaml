@@ -16,6 +16,7 @@ exclude: |
     \.git/|
     \.terraform/|
     \.terragrunt-cache/|
+    \.venv/|
     vendor/|
     bin/|
     dist/|
