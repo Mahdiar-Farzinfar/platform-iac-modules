@@ -556,7 +556,7 @@ tasks:
               test_file="$(find "${module_path}/tests" -maxdepth 1 -type f -name '*.tftest.hcl' -print -quit 2>/dev/null || true)"
               if [ -n "${test_file}" ]; then
                 echo "==> terraform test: ${module_path}"
-                terraform -chdir="${module_path}" test -input=false
+                terraform -chdir="${module_path}" test
               fi
             done
 
