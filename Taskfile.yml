@@ -173,7 +173,7 @@ tasks:
           exit 0
         fi
         init_flags="-backend=false -input=false"
-        if [ "{{.UPGRADE | default \"0\"}}" = "1" ]; then
+        if [ "{{.UPGRADE | default "0"}}" = "1" ]; then
           init_flags="${init_flags} -upgrade"
         fi
         modules_dir='{{.MODULES_DIR}}'
