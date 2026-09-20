@@ -167,26 +167,30 @@ tasks:
     platforms: [linux, darwin]
     cmds:
       - |
-        set -euo pipefail
+        bash -euo pipefail <<'BASH'
         if [ ! -d "{{.MODULES_DIR}}" ]; then
-          echo "Skipping terraform init: modules directory not found at {{.MODULES_DIR}}"
-          exit 0
+          echo "ERROR: Terraform modules directory not found: {{.MODULES_DIR}}" >&2
+          exit 1
         fi
-        init_flags="-backend=false -input=false"
+        init_flags=(-backend=false -input=false)
         if [ "{{.UPGRADE | default "0"}}" = "1" ]; then
-          init_flags="${init_flags} -upgrade"
+          init_flags+=(-upgrade)
         fi
         modules_dir='{{.MODULES_DIR}}'
         tmpfile="$(mktemp)"
         trap 'rm -f "$tmpfile"' EXIT
         find "$modules_dir" -type f -name 'main.tf' ! -path '*/.terraform/*' -exec dirname {} \; \
           | sort -u > "$tmpfile"
+        if [ ! -s "$tmpfile" ]; then
+          echo "ERROR: No main.tf files discovered under: $modules_dir" >&2
+          exit 1
+        fi
         while IFS= read -r module_path; do
           [ -n "$module_path" ] || continue
           echo "==> terraform init: ${module_path}"
-          # shellcheck disable=SC2086
-          terraform -chdir="${module_path}" init ${init_flags}
+          terraform -chdir="${module_path}" init "${init_flags[@]}" < /dev/null
         done < "$tmpfile"
+        BASH
 
   # -----------------------------
   # OS/Cross-platform tests
