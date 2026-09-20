@@ -517,7 +517,7 @@ jobs:
           if [[ "${{ steps.shared-changes.outputs.force_full_matrix }}" == "true" ]]; then
             echo "Shared validation trigger detected; building full module matrix."
 
-            jq -nc '
+            jq -Rnc '
               {
                 include: [
                   inputs
@@ -529,7 +529,7 @@ jobs:
                 ]
               }
             ' < <(
-              find modules -mindepth 1 -maxdepth 1 -type d | sort
+              find modules -mindepth 1 -maxdepth 1 -type d -print | sort
             ) > /tmp/matrix.json
           else
             python3 ./scripts/ci/build-matrix.py \
