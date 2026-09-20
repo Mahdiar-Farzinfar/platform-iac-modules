@@ -31,6 +31,7 @@ vars:
 env:
   TF_IN_AUTOMATION: "{{.TF_IN_AUTOMATION}}"
   TF_INPUT: "false"
+  TF_PLUGIN_CACHE_DIR: "{{.ROOT_DIR}}/.terraform.d/plugin-cache"
   CHECKPOINT_DISABLE: "1"
   PYTHONUTF8: "1"
   PYTHONIOENCODING: "utf-8"
@@ -48,6 +49,9 @@ tasks:
   preflight:
     desc: Verify environment and required tools
     cmds:
+      - >-
+        {{if .IS_WINDOWS}}python{{else}}python3{{end}} -c
+        "import os; from pathlib import Path; Path(os.environ['TF_PLUGIN_CACHE_DIR']).mkdir(parents=True, exist_ok=True)"
       - task: preflight:windows
       - task: preflight:posix
 
@@ -288,7 +292,7 @@ tasks:
   # -----------------------------
   validate:terraform:
     desc: Validate Terraform modules
-    deps: [preflight, init]
+    deps: [init]
     cmds:
       - task: validate:terraform:windows
       - task: validate:terraform:posix
@@ -309,11 +313,10 @@ tasks:
           echo "Skipping terraform validate: modules directory not found at {{.MODULES_DIR}}"
           exit 0
         fi
-        find "{{.MODULES_DIR}}" -type f -name 'main.tf' ! -path '*/.terraform/*' -printf '%h\n' \
+        find "{{.MODULES_DIR}}" -type f -name 'main.tf' ! -path '*/.terraform/*' -exec dirname {} \; \
           | sort -u \
           | while IFS= read -r module_path; do
               echo "==> terraform validate: ${module_path}"
-              terraform -chdir="${module_path}" init -backend=false -upgrade
               terraform -chdir="${module_path}" validate
             done
 
@@ -513,7 +516,7 @@ tasks:
   # -----------------------------
   test:terraform:
     desc: Run terraform tests (tftest.hcl based)
-    deps: [preflight]
+    deps: [init]
     cmds:
       - task: test:terraform:windows
       - task: test:terraform:posix
@@ -534,7 +537,7 @@ tasks:
           echo "Skipping terraform tests: modules directory not found at {{.MODULES_DIR}}"
           exit 0
         fi
-        find "{{.MODULES_DIR}}" -type f -name 'main.tf' ! -path '*/.terraform/*' -printf '%h\n' \
+        find "{{.MODULES_DIR}}" -type f -name 'main.tf' ! -path '*/.terraform/*' -exec dirname {} \; \
           | sort -u \
           | while IFS= read -r module_path; do
               test_file="$(find "${module_path}/tests" -maxdepth 1 -type f -name '*.tftest.hcl' -print -quit 2>/dev/null || true)"
