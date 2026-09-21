@@ -11,7 +11,7 @@
 babel==2.18.0 \
     --hash=sha256:b80b99a14bd085fcacfa15c9165f651fbb3406e66cc603abf11c5750937c992d \
     --hash=sha256:e2b422b277c2b9a9630c1d7903c2a00d0830c409c59ac8cae9081c92f1aeba35
-    # via mkdocs-git-revision-date-localized-plugin, mkdocs-material
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, mkdocs-git-revision-date-localized-plugin, mkdocs-material
 backrefs==8.0 \
     --hash=sha256:4a627b817fd2dce43b79ab48da63613340509381cd8ce0897078a0bce79a2ab8 \
     --hash=sha256:601ce68ca12385dbda06ce264406b4c4210cf5b79fd0fd627592365c92f29a88 \
@@ -19,11 +19,11 @@ backrefs==8.0 \
     --hash=sha256:9ec96efa080938be92323e8e730e57718c9c88eb15ad70bbef4e1766df591408 \
     --hash=sha256:b556cd7d36c3a3a2f256b89590b176b8eddfb73bcfaee3a3ddd84ea66d21ce50 \
     --hash=sha256:f0c35cf0102ba6b6070c12a492be3c1c1d3f5839529784b9a9565d6d04569a01
-    # via mkdocs-material
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, mkdocs-material
 certifi==2026.7.22 \
     --hash=sha256:62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775 \
     --hash=sha256:741e2c3b351ddf169a738da9f2c048608ff7f2c5cc02f1ebc6b118bb090d5d55
-    # via requests
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, requests
 charset-normalizer==3.5.1 \
     --hash=sha256:00668ebb0609751758682eb0b5857e7c35b9f00e84dfdef062e103244ec94d45 \
     --hash=sha256:012a22b88a77ca2e59b98ac5889b0deb604147666032f45e6d6e217634d2550d \
@@ -197,56 +197,56 @@ charset-normalizer==3.5.1 \
     --hash=sha256:fd0350afdc3aabd5576f60ea109228bd5538139713c7b094c5cd27c73a98bc6f \
     --hash=sha256:fd0a274c0e5f9a21565cd9d3dd749b61f96b7aa1e20a93aa1ba4029518f2e5c0 \
     --hash=sha256:fdb8a068947befafba9952162645dc2fecaeb400e64584829ed5e9b2fbe21a7f
-    # via requests
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, requests
 click==8.5.0 \
     --hash=sha256:255bc9599cf7748b4b1a446ccc735421bd08a2ae529a8b88597d3de5664ee360 \
     --hash=sha256:ba0d2089de75ea0310e2dde03160e6ca10009947fb95a182f9b54021bb272e34
-    # via mkdocs
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, mkdocs
 colorama==0.4.6 \
     --hash=sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44 \
     --hash=sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6
-    # via mkdocs, mkdocs-material
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, mkdocs, mkdocs-material
 csscompressor==0.9.5 \
     --hash=sha256:afa22badbcf3120a4f392e4d22f9fff485c044a1feda4a950ecc5eba9dd31a05
-    # via mkdocs-minify-plugin
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, mkdocs-minify-plugin
 ghp-import==2.1.0 \
     --hash=sha256:8337dd7b50877f163d4c0289bc1f1c7f127550241988d568c1db512c4324a619 \
     --hash=sha256:9c535c4c61193c2df8871222567d7fd7e5014d835f97dc7b7439069e2413d343
-    # via mkdocs
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, mkdocs
 gitdb==4.0.12 \
     --hash=sha256:5ef71f855d191a3326fcfbc0d5da835f26b13fbcba60c32c21091c349ffdb571 \
     --hash=sha256:67073e15955400952c6565cc3e707c554a4eea2e428946f7a4c162fab9bd9bcf
-    # via gitpython
-gitpython==3.1.59 \
-    --hash=sha256:0a1475cfdc38a5bfba1a3e9a4a9da52a39749ecec322b772915c019f94e5b7e4 \
-    --hash=sha256:67a82f537384578643624c8b2c531938a9b82be431663e575dcf638526631d4c
-    # via -r F:/Projects/platform-iac-modules/docs/.requirements.g0ys6j38.in, mkdocs-git-revision-date-localized-plugin
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, gitpython
+gitpython==3.1.60 \
+    --hash=sha256:39548bffb8fa0f3a548133348868bb4838e79d73283052207dc97781a569b6b4 \
+    --hash=sha256:e936431879fa85581b4311fa63492ea52251909e2d655b6529c704c904ddcc24
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, mkdocs-git-revision-date-localized-plugin
 htmlmin2==0.1.13 \
     --hash=sha256:75609f2a42e64f7ce57dbff28a39890363bde9e7e5885db633317efbdf8c79a2
-    # via mkdocs-minify-plugin
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, mkdocs-minify-plugin
 idna==3.18 \
     --hash=sha256:7f952cbe720b688055e3f87de14f5c3e5fdaa8bc3928985c4077ca689de849a2 \
     --hash=sha256:ffb385a7e039654cef1ab9ef32c6fafe283c0c0467bba1d9029738ce4a14a848
-    # via -r F:/Projects/platform-iac-modules/docs/.requirements.g0ys6j38.in, requests
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, requests
 importlib-metadata==9.0.1 \
     --hash=sha256:ab830580bc0ef3db61ce8fae716389e5462b67e033018bab6d8f80ef17172f99 \
     --hash=sha256:bba5600596a7e21f3eef53281cf28d6a5195634d2f2b78ff9501a3272c6eaab0
-    # via mike
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, mike
 importlib-resources==7.1.0 \
     --hash=sha256:0722d4c6212489c530f2a145a34c0a7a3b4721bc96a15fada5930e2a0b760708 \
     --hash=sha256:1bd7b48b4088eddb2cd16382150bb515af0bd2c70128194392725f82ad2c96a1
-    # via mike
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, mike
 jinja2==3.1.6 \
     --hash=sha256:0137fb05990d35f1275a587e9aee6d56da821fc83491a0fb838183be43f66d6d \
     --hash=sha256:85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67
-    # via mike, mkdocs, mkdocs-material
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, mike, mkdocs, mkdocs-material
 jsmin==3.0.1 \
     --hash=sha256:c0959a121ef94542e807a674142606f7e90214a2b3d1eb17300244bbb5cc2bfc
-    # via mkdocs-minify-plugin
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, mkdocs-minify-plugin
 markdown==3.10.3 \
     --hash=sha256:3589362618f743188b4d955b874402bc814f4f83f544dc207719f4baa7d9c45f \
     --hash=sha256:fa6c92a00a4a3c98b22728c64a935ae1928250ae65058a6ded814d2cc29a4cea
-    # via mkdocs, mkdocs-material, pymdown-extensions
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, mkdocs, mkdocs-material, pymdown-extensions
 markupsafe==3.0.3 \
     --hash=sha256:0303439a41979d9e74d18ff5e2dd8c43ed6c6001fd40e5bf2e43f7bd9bbc523f \
     --hash=sha256:068f375c472b3e7acbe2d5318dea141359e6900156b5b2ba06a30b169086b91a \
@@ -337,75 +337,75 @@ markupsafe==3.0.3 \
     --hash=sha256:f71a396b3bf33ecaa1626c255855702aca4d3d9fea5e051b41ac59a9c1c41edc \
     --hash=sha256:f9e130248f4462aaa8e2552d547f36ddadbeaa573879158d721bbd33dfe4743a \
     --hash=sha256:fed51ac40f757d41b7c48425901843666a6677e3e8eb0abcff09e4ba6e664f50
-    # via jinja2, mkdocs
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, jinja2, mkdocs
 mergedeep==1.3.4 \
     --hash=sha256:0096d52e9dad9939c3d975a774666af186eda617e6ca84df4c94dec30004f2a8 \
     --hash=sha256:70775750742b25c0d8f36c55aed03d24c3384d17c951b3175d898bd778ef0307
-    # via mkdocs, mkdocs-get-deps
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, mkdocs, mkdocs-get-deps
 mike==2.1.3 \
     --hash=sha256:abd79b8ea483fb0275b7972825d3082e5ae67a41820f8d8a0dc7a3f49944e810 \
     --hash=sha256:d90c64077e84f06272437b464735130d380703a76a5738b152932884c60c062a
-    # via -r F:/Projects/platform-iac-modules/docs/.requirements.g0ys6j38.in
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in
 mkdocs==1.6.1 \
     --hash=sha256:7b432f01d928c084353ab39c57282f29f92136665bdd6abf7c1ec8d822ef86f2 \
     --hash=sha256:db91759624d1647f3f34aa0c3f327dd2601beae39a366d6e064c03468d35c20e
-    # via -r F:/Projects/platform-iac-modules/docs/.requirements.g0ys6j38.in, mike, mkdocs-git-revision-date-localized-plugin, mkdocs-material, mkdocs-minify-plugin
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, mike, mkdocs-git-revision-date-localized-plugin, mkdocs-material, mkdocs-minify-plugin
 mkdocs-get-deps==0.2.2 \
     --hash=sha256:8ee8d5f316cdbbb2834bc1df6e69c08fe769a83e040060de26d3c19fad3599a1 \
     --hash=sha256:e7878cbeac04860b8b5e0ca31d3abad3df9411a75a32cde82f8e44b6c16ff650
-    # via mkdocs
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, mkdocs
 mkdocs-git-revision-date-localized-plugin==1.3.0 \
     --hash=sha256:439e2f14582204050a664c258861c325064d97cdc848c541e48bb034a6c4d0cb \
     --hash=sha256:c99377ee119372d57a9e47cff4e68f04cce634a74831c06bc89b33e456e840a1
-    # via -r F:/Projects/platform-iac-modules/docs/.requirements.g0ys6j38.in
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in
 mkdocs-material==9.7.7 \
     --hash=sha256:8ea9bb1737a5b524a5f9dcf2e1b4ebda8274ae3008aa7845720a97083bef708f \
     --hash=sha256:c0649c065b1b0512d60aad8c10f947f8e455284475239b364b610f2deb4d0855
-    # via -r F:/Projects/platform-iac-modules/docs/.requirements.g0ys6j38.in
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in
 mkdocs-material-extensions==1.3.1 \
     --hash=sha256:10c9511cea88f568257f960358a467d12b970e1f7b2c0e5fb2bb48cab1928443 \
     --hash=sha256:adff8b62700b25cb77b53358dad940f3ef973dd6db797907c49e3c2ef3ab4e31
-    # via mkdocs-material
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, mkdocs-material
 mkdocs-minify-plugin==0.8.0 \
     --hash=sha256:5fba1a3f7bd9a2142c9954a6559a57e946587b21f133165ece30ea145c66aee6 \
     --hash=sha256:bc11b78b8120d79e817308e2b11539d790d21445eb63df831e393f76e52e753d
-    # via -r F:/Projects/platform-iac-modules/docs/.requirements.g0ys6j38.in
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in
 packaging==26.3 \
     --hash=sha256:94edc256424af38762eb31306eed28beb9f0efc50a8837492c9d6fd6004aed79 \
     --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c
-    # via mkdocs
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, mkdocs
 paginate==0.5.7 \
     --hash=sha256:22bd083ab41e1a8b4f3690544afb2c60c25e5c9a63a30fa2f483f6c60c8e5945 \
     --hash=sha256:b885e2af73abcf01d9559fd5216b57ef722f8c42affbb63942377668e35c7591
-    # via mkdocs-material
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, mkdocs-material
 pathspec==1.1.1 \
     --hash=sha256:17db5ecd524104a120e173814c90367a96a98d07c45b2e10c2f3919fff91bf5a \
     --hash=sha256:a00ce642f577bf7f473932318056212bc4f8bfdf53128c78bbd5af0b9b20b189
-    # via mkdocs
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, mkdocs
 platformdirs==4.11.8 \
     --hash=sha256:52f2f181bbfde907966932cc8312d967d02976422d66d537ea16092b8e291081 \
     --hash=sha256:f23abafea7dd4276d1f29104b83598d7dcc567cafd07c9c951e66665645437fc
-    # via mkdocs-get-deps
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, mkdocs-get-deps
 pygments==2.21.0 \
     --hash=sha256:2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9 \
     --hash=sha256:610ca751c9bc2492b38eb9a38a7fbc93edbbb2d7182edaf34e66ae493dee5c8c
-    # via mkdocs-material
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, mkdocs-material
 pymdown-extensions==11.0.1 \
     --hash=sha256:db3943a62bab7e03af1364f0c4083e64b91fb097675a4b6cceccfbe9a77e5eb2 \
     --hash=sha256:dd2905ae6fc5b75582fafb139a1266ffc754705efa902aa50067fa7ff4f94ec0
-    # via -r F:/Projects/platform-iac-modules/docs/.requirements.g0ys6j38.in, mkdocs-material
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, mkdocs-material
 pyparsing==3.3.2 \
     --hash=sha256:850ba148bd908d7e2411587e247a1e4f0327839c40e2e5e6d05a007ecc69911d \
     --hash=sha256:c777f4d763f140633dcb6d8a3eda953bf7a214dc4eff598413c070bcdc117cbc
-    # via mike
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, mike
 python-dateutil==2.9.0.post0 \
     --hash=sha256:37dd54208da7e1cd875388217d5e00ebd4179249f90fb72437e91a35459a0ad3 \
     --hash=sha256:a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427
-    # via ghp-import
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, ghp-import
 pytz==2026.3.post1 \
     --hash=sha256:2211d3fcf9a797d3405cac96ac7f61d80e6a644f72a3309607282fe8a2010c5d \
     --hash=sha256:dd95840dd199baea12d9cc096a1d452caa6596a1c1e4b5f3dbd1541855d5e815
-    # via mkdocs-git-revision-date-localized-plugin
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, mkdocs-git-revision-date-localized-plugin
 pyyaml==6.0.3 \
     --hash=sha256:00c4bdeba853cc34e7dd471f16b4114f4162dc03e6b7afcc2128711f0eca823c \
     --hash=sha256:0150219816b6a1fa26fb4699fb7daa9caf09eb1999f3b70fb6e786805e80375a \
@@ -480,31 +480,31 @@ pyyaml==6.0.3 \
     --hash=sha256:f7057c9a337546edc7973c0d3ba84ddcdf0daa14533c2065749c9075001090e6 \
     --hash=sha256:fa160448684b4e94d80416c0fa4aac48967a969efe22931448d853ada8baf926 \
     --hash=sha256:fc09d0aa354569bc501d4e787133afc08552722d3ab34836a80547331bb5d4a0
-    # via mike, mkdocs, mkdocs-get-deps, pymdown-extensions, pyyaml-env-tag
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, mike, mkdocs, mkdocs-get-deps, pymdown-extensions, pyyaml-env-tag
 pyyaml-env-tag==1.1 \
     --hash=sha256:17109e1a528561e32f026364712fee1264bc2ea6715120891174ed1b980d2e04 \
     --hash=sha256:2eb38b75a2d21ee0475d6d97ec19c63287a7e140231e4214969d0eac923cd7ff
-    # via mike, mkdocs
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, mike, mkdocs
 requests==2.34.2 \
     --hash=sha256:2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0 \
     --hash=sha256:f288924cae4e29463698d6d60bc6a4da69c89185ad1e0bcc4104f584e960b9ed
-    # via mkdocs-material
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, mkdocs-material
 six==1.17.0 \
     --hash=sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274 \
     --hash=sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81
-    # via python-dateutil
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, python-dateutil
 smmap==5.0.3 \
     --hash=sha256:4d9debb8b99007ae47165abc08670bd74cb74b5227dda7f643eccc4e9eb5642c \
     --hash=sha256:c106e05d5a61449cf6ba9a1e650227ecfb141590d2a98412103ff35d89fc7b2f
-    # via gitdb
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, gitdb
 urllib3==2.7.0 \
     --hash=sha256:231e0ec3b63ceb14667c67be60f2f2c40a518cb38b03af60abc813da26505f4c \
     --hash=sha256:9fb4c81ebbb1ce9531cce37674bbc6f1360472bc18ca9a553ede278ef7276897
-    # via requests
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, requests
 verspec==0.1.0 \
     --hash=sha256:741877d5633cc9464c45a469ae2a31e801e6dbbaa85b9675d481cda100f11c31 \
     --hash=sha256:c4504ca697b2056cdb4bfa7121461f5a0e81809255b41c03dda4ba823637c01e
-    # via mike
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, mike
 watchdog==6.0.0 \
     --hash=sha256:07df1fdd701c5d4c8e55ef6cf55b8f0120fe1aef7ef39a1c6fc6bc2e606d517a \
     --hash=sha256:20ffe5b202af80ab4266dcd3e91aae72bf2da48c0d33bdb15c66658e685e94e2 \
@@ -536,8 +536,8 @@ watchdog==6.0.0 \
     --hash=sha256:e6f0e77c9417e7cd62af82529b10563db3423625c5fce018430b249bf977f9e8 \
     --hash=sha256:e7631a77ffb1f7d2eefa4445ebbee491c720a5661ddf6df3498ebecae5ed375c \
     --hash=sha256:ef810fbf7b781a5a593894e4f439773830bdecb885e6880d957d5b9382a960d2
-    # via mkdocs
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, mkdocs
 zipp==4.1.0 \
     --hash=sha256:25ad4e16390cd314347dd8f1de67a2ac538ae658ed4ab9db16029c07c188e97f \
     --hash=sha256:4cb57381f544315db7688e976e922a2b18cdb513d21cc194eb42232ba2a3e602
-    # via importlib-metadata
+    # via -r F:/Projects/platform-iac-modules/docs/.requirements.m0lo_gw3.in, importlib-metadata

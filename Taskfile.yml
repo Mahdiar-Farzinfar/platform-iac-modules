@@ -31,6 +31,7 @@ vars:
 env:
   TF_IN_AUTOMATION: "{{.TF_IN_AUTOMATION}}"
   TF_INPUT: "false"
+  TF_PLUGIN_CACHE_DIR: "{{.ROOT_DIR}}/.terraform.d/plugin-cache"
   CHECKPOINT_DISABLE: "1"
   PYTHONUTF8: "1"
   PYTHONIOENCODING: "utf-8"
@@ -47,7 +48,11 @@ tasks:
   # -----------------------------
   preflight:
     desc: Verify environment and required tools
+    run: once
     cmds:
+      - >-
+        {{if .IS_WINDOWS}}python{{else}}python3{{end}} -c
+        "import os; from pathlib import Path; Path(os.environ['TF_PLUGIN_CACHE_DIR']).mkdir(parents=True, exist_ok=True)"
       - task: preflight:windows
       - task: preflight:posix
 
@@ -77,10 +82,12 @@ tasks:
 
   verify:toolchain:
     desc: Verify canonical toolchain versions and compatibility mirrors
+    run: once
     deps:
       - verify:toolchain:script
 
   verify:toolchain:script:
+    run: once
     internal: true
     cmds:
       - |
@@ -96,10 +103,12 @@ tasks:
 
   verify:outputs:
     desc: Validate output patterns to prevent injection (Sanitization)
+    run: once
     deps:
       - verify:outputs:script
 
   verify:outputs:script:
+    run: once
     internal: true
     cmds:
       - |
@@ -139,6 +148,7 @@ tasks:
 
   init:
     desc: Initialize Terraform working directories for all modules
+    run: once
     deps: [preflight]
     cmds:
       - task: init:windows
@@ -146,30 +156,41 @@ tasks:
 
   init:windows:
     internal: true
+    run: once
     platforms: [windows]
     cmds:
       - powershell -NoProfile -ExecutionPolicy Bypass -File "{{.WINDOWS_TASKS_SCRIPT}}" -Task init -ModulesDir "{{.MODULES_DIR}}"
 
   init:posix:
     internal: true
+    run: once
     platforms: [linux, darwin]
     cmds:
       - |
-        set -euo pipefail
+        bash -euo pipefail <<'BASH'
         if [ ! -d "{{.MODULES_DIR}}" ]; then
-          echo "Skipping terraform init: modules directory not found at {{.MODULES_DIR}}"
-          exit 0
+          echo "ERROR: Terraform modules directory not found: {{.MODULES_DIR}}" >&2
+          exit 1
+        fi
+        init_flags=(-backend=false -input=false)
+        if [ "{{.UPGRADE | default "0"}}" = "1" ]; then
+          init_flags+=(-upgrade)
         fi
         modules_dir='{{.MODULES_DIR}}'
         tmpfile="$(mktemp)"
         trap 'rm -f "$tmpfile"' EXIT
         find "$modules_dir" -type f -name 'main.tf' ! -path '*/.terraform/*' -exec dirname {} \; \
           | sort -u > "$tmpfile"
+        if [ ! -s "$tmpfile" ]; then
+          echo "ERROR: No main.tf files discovered under: $modules_dir" >&2
+          exit 1
+        fi
         while IFS= read -r module_path; do
           [ -n "$module_path" ] || continue
           echo "==> terraform init: ${module_path}"
-          terraform -chdir="${module_path}" init -backend=false -upgrade
+          terraform -chdir="${module_path}" init "${init_flags[@]}" < /dev/null
         done < "$tmpfile"
+        BASH
 
   # -----------------------------
   # OS/Cross-platform tests
@@ -288,7 +309,7 @@ tasks:
   # -----------------------------
   validate:terraform:
     desc: Validate Terraform modules
-    deps: [preflight, init]
+    deps: [init]
     cmds:
       - task: validate:terraform:windows
       - task: validate:terraform:posix
@@ -309,11 +330,10 @@ tasks:
           echo "Skipping terraform validate: modules directory not found at {{.MODULES_DIR}}"
           exit 0
         fi
-        find "{{.MODULES_DIR}}" -type f -name 'main.tf' ! -path '*/.terraform/*' -printf '%h\n' \
+        find "{{.MODULES_DIR}}" -type f -name 'main.tf' ! -path '*/.terraform/*' -exec dirname {} \; \
           | sort -u \
           | while IFS= read -r module_path; do
               echo "==> terraform validate: ${module_path}"
-              terraform -chdir="${module_path}" init -backend=false -upgrade
               terraform -chdir="${module_path}" validate
             done
 
@@ -340,7 +360,7 @@ tasks:
           echo "Skipping tflint: modules directory not found at {{.MODULES_DIR}}"
           exit 0
         fi
-        find "{{.MODULES_DIR}}" -type f -name 'main.tf' ! -path '*/.terraform/*' -printf '%h\n' \
+        find "{{.MODULES_DIR}}" -type f -name 'main.tf' ! -path '*/.terraform/*' -exec dirname {} \; \
           | sort -u \
           | while IFS= read -r module_path; do
               echo "==> tflint: ${module_path}"
@@ -363,7 +383,7 @@ tasks:
     desc: Lint YAML files
     deps: [preflight]
     cmds:
-      - python -m yamllint -c tooling/.yamllint.yml .
+      - '{{if .IS_WINDOWS}}python{{else}}python3{{end}} -m yamllint -c "{{.TOOLING_DIR}}/.yamllint.yml" .'
 
   lint:md:
     desc: Lint Markdown files
@@ -435,7 +455,7 @@ tasks:
   security:gitleaks:
     desc: Run secrets scan using gitleaks
     cmds:
-      - gitleaks detect --verbose --source "{{.ROOT_DIR}}" --no-git
+      - gitleaks detect --verbose --source "{{.ROOT_DIR}}" --no-git --config "{{.ROOT_DIR}}/tooling/.gitleaks.toml"
 
   security:all:
     desc: Run all security scans (Checkov  Trivy  Gitleaks)
@@ -469,12 +489,19 @@ tasks:
           echo "Skipping terraform-docs: modules directory not found at {{.MODULES_DIR}}"
           exit 0
         fi
-        find "{{.MODULES_DIR}}" -type f -name 'main.tf' ! -path '*/.terraform/*' -printf '%h\n' \
-          | sort -u \
-          | while IFS= read -r module_path; do
-              echo "==> terraform-docs: ${module_path}"
-              terraform-docs markdown table --config "{{.ROOT_DIR}}/.terraform-docs.yml" --output-file README.md --output-mode inject "${module_path}"
-            done
+        for module_path in "{{.MODULES_DIR}}"/*; do
+          [ -d "$module_path" ] || continue
+          has_terraform=false
+          for terraform_file in "$module_path"/*.tf; do
+            if [ -f "$terraform_file" ]; then
+              has_terraform=true
+              break
+            fi
+          done
+          [ "$has_terraform" = true ] || continue
+          echo "==> terraform-docs: ${module_path}"
+          terraform-docs markdown table --config "{{.ROOT_DIR}}/.terraform-docs.yml" --recursive=false --output-file README.md --output-mode inject "${module_path}"
+        done
 
   docs:check:
     desc: Ensure docs are up-to-date (fails if git diff exists)
@@ -506,7 +533,7 @@ tasks:
   # -----------------------------
   test:terraform:
     desc: Run terraform tests (tftest.hcl based)
-    deps: [preflight]
+    deps: [init]
     cmds:
       - task: test:terraform:windows
       - task: test:terraform:posix
@@ -527,7 +554,7 @@ tasks:
           echo "Skipping terraform tests: modules directory not found at {{.MODULES_DIR}}"
           exit 0
         fi
-        find "{{.MODULES_DIR}}" -type f -name 'main.tf' ! -path '*/.terraform/*' -printf '%h\n' \
+        find "{{.MODULES_DIR}}" -type f -name 'main.tf' ! -path '*/.terraform/*' -exec dirname {} \; \
           | sort -u \
           | while IFS= read -r module_path; do
               test_file="$(find "${module_path}/tests" -maxdepth 1 -type f -name '*.tftest.hcl' -print -quit 2>/dev/null || true)"
@@ -554,9 +581,12 @@ tasks:
             echo "Skipping go test: modules directory not found at {{.MODULES_DIR}}"
             exit 0
           fi
+          if [ "${RUN_INTEGRATION_TESTS:-false}" != "true" ]; then
+            echo "Skipping AWS integration tests: set RUN_INTEGRATION_TESTS=true after configuring AWS."
+            exit 0
+          fi
           dirs=$(
             find "{{.MODULES_DIR}}" -type f -name "integration_test.go" -exec dirname {} \; 2>/dev/null |
-            xargs -I{} dirname {} |
             sort -u
           )
 
@@ -636,6 +666,7 @@ tasks:
       Intended for Validate / non-security workflows; security stays in a dedicated pipeline.
     cmds:
       - task: preflight
+      - task: init
       - task: ci:non-security:gates
 
   ci:non-security:gates:
@@ -652,6 +683,7 @@ tasks:
     desc: CI-equivalent checks (no auto-fix)
     deps:
       - preflight
+      - init
       - ci:changed
       - lint
       - security:all

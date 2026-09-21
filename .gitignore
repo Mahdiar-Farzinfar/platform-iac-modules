@@ -33,6 +33,7 @@ Icon?
 # ==================================================
 .env
 .env.*
+.venv/
 !.env.example
 secrets.auto.tfvars
 *.env

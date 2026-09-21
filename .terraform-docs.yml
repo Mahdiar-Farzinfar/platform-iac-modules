@@ -133,7 +133,7 @@ settings:
   hide-empty: true
   html: true
   indent: 2
-  lockfile: true
+  lockfile: false
   read-comments: true
   required: true
   sensitive: true
