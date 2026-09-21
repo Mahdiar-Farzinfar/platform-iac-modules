@@ -121,6 +121,10 @@ jobs:
       contents: read
     outputs:
       python: ${{ steps.python.outputs.version }}
+      terraform: ${{ steps.tools.outputs.terraform }}
+      tflint: ${{ steps.tools.outputs.tflint }}
+      checkov: ${{ steps.tools.outputs.checkov }}
+      trivy: ${{ steps.tools.outputs.trivy }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
@@ -138,6 +142,26 @@ jobs:
           version=$(grep -E '^\s*python\s+(\S+)\s*$' "$TOOL_VERSIONS_FILE" | awk '{print $2}' | head -n1)
           [[ -n "$version" ]] || { echo "ERROR: python version not found in $TOOL_VERSIONS_FILE"; exit 1; }
           echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve test dependency versions from .tool-versions
+        id: tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          for tool in terraform tflint checkov trivy; do
+            version="$(awk -v tool="$tool" '
+              { sub(/#.*/, ""); sub(/\r$/, "") }
+              $1 == tool {
+                if (NF != 2 || found++) exit 1
+                version = $2
+              }
+              END { if (found != 1) exit 1; print version }
+            ' tooling/.tool-versions)"
+            [[ "$version" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+              echo "ERROR: expected one pinned release version for $tool"; exit 1;
+            }
+            echo "$tool=${version#v}" >> "$GITHUB_OUTPUT"
+          done
 
   linux:
     name: Cross-platform • linux-x86_64
@@ -159,6 +183,8 @@ jobs:
             api.github.com:443
             codeload.github.com:443
             objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            releases.hashicorp.com:443
             proxy.golang.org:443
             sum.golang.org:443
             pypi.org:443
@@ -223,6 +249,31 @@ jobs:
 
           rm -f /tmp/install-tools-posix
 
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e  #v4.0.1
+        with:
+          terraform_version: ${{ needs.resolve-tool-versions.outputs.terraform }}
+          terraform_wrapper: false
+
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@1cf010d3c7aef302051ccdb68c14c5dc2efa34ef  #v6.3.1
+        with:
+          tflint_version: v${{ needs.resolve-tool-versions.outputs.tflint }}
+          tflint_wrapper: false
+
+      - name: Setup Checkov CLI
+        shell: bash
+        env:
+          CHECKOV_VERSION: ${{ needs.resolve-tool-versions.outputs.checkov }}
+        run: python -m pip install --disable-pip-version-check "checkov==${CHECKOV_VERSION}"
+
+      - name: Setup Trivy
+        uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567  #v0.3.1
+        with:
+          version: v${{ needs.resolve-tool-versions.outputs.trivy }}
+          path: ${{ runner.temp }}/trivy
+          cache: false
+
       - name: Run cross-platform tests (Task SoT)
         shell: bash
         run: task test:cross-platform:linux
@@ -256,6 +307,8 @@ jobs:
             api.github.com:443
             codeload.github.com:443
             objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            releases.hashicorp.com:443
             proxy.golang.org:443
             sum.golang.org:443
             pypi.org:443
@@ -320,6 +373,31 @@ jobs:
 
           rm -f "${OUT}"
 
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e  #v4.0.1
+        with:
+          terraform_version: ${{ needs.resolve-tool-versions.outputs.terraform }}
+          terraform_wrapper: false
+
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@1cf010d3c7aef302051ccdb68c14c5dc2efa34ef  #v6.3.1
+        with:
+          tflint_version: v${{ needs.resolve-tool-versions.outputs.tflint }}
+          tflint_wrapper: false
+
+      - name: Setup Checkov CLI
+        shell: bash
+        env:
+          CHECKOV_VERSION: ${{ needs.resolve-tool-versions.outputs.checkov }}
+        run: python -m pip install --disable-pip-version-check "checkov==${CHECKOV_VERSION}"
+
+      - name: Setup Trivy
+        uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567  #v0.3.1
+        with:
+          version: v${{ needs.resolve-tool-versions.outputs.trivy }}
+          path: ${{ runner.temp }}/trivy
+          cache: false
+
       - name: Run cross-platform tests (Task SoT)
         shell: bash
         run: task test:cross-platform:macos
@@ -353,6 +431,8 @@ jobs:
             api.github.com:443
             codeload.github.com:443
             objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            releases.hashicorp.com:443
             proxy.golang.org:443
             sum.golang.org:443
             pypi.org:443
@@ -452,6 +532,31 @@ jobs:
           }
 
           Remove-Item -LiteralPath $out -Force -ErrorAction SilentlyContinue
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e  #v4.0.1
+        with:
+          terraform_version: ${{ needs.resolve-tool-versions.outputs.terraform }}
+          terraform_wrapper: false
+
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@1cf010d3c7aef302051ccdb68c14c5dc2efa34ef  #v6.3.1
+        with:
+          tflint_version: v${{ needs.resolve-tool-versions.outputs.tflint }}
+          tflint_wrapper: false
+
+      - name: Setup Checkov CLI
+        shell: bash
+        env:
+          CHECKOV_VERSION: ${{ needs.resolve-tool-versions.outputs.checkov }}
+        run: python -m pip install --disable-pip-version-check "checkov==${CHECKOV_VERSION}"
+
+      - name: Setup Trivy
+        uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567  #v0.3.1
+        with:
+          version: v${{ needs.resolve-tool-versions.outputs.trivy }}
+          path: ${{ runner.temp }}/trivy
+          cache: false
 
       - name: Run cross-platform tests (Task SoT)
         shell: bash
