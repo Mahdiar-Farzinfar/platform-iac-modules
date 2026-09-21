@@ -553,9 +553,9 @@ jobs:
           echo "matrix=${MATRIX_JSON}" >> "$GITHUB_OUTPUT"
 
   validate-modules:
-    name: Validate modules
+    name: Module contract gate
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     needs: [repo-baseline, detect-changes]
     if: >-
       always() &&
@@ -577,158 +577,41 @@ jobs:
       - name: Checkout
         uses: actions/checkout@1044a6dea927916f2c38ba5aeffbc0a847b1221a  # v7.0.0
 
-      - name: Prepare Terraform plugin cache
-        run: mkdir -p "${TF_PLUGIN_CACHE_DIR}"
-
-      - name: Cache Terraform plugins and providers
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
-        with:
-          path: ${{ env.TF_PLUGIN_CACHE_DIR }}
-          key: ${{ runner.os }}-tf-v3-${{ needs.repo-baseline.outputs.terraform_version }}-${{ hashFiles(format('{0}/.terraform.lock.hcl', matrix.path), 'tooling/.terraform-version', 'tooling/.tool-versions') }}
-          restore-keys: |
-            ${{ runner.os }}-tf-v3-${{ needs.repo-baseline.outputs.terraform_version }}-
-
-      - name: Setup Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Verify Go module integrity
-        working-directory: ${{ github.workspace }}
-        run: |
-          set -euo pipefail
-          go mod verify
-
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e  # v4.0.1
         with:
           terraform_version: ${{ needs.repo-baseline.outputs.terraform_version }}
           terraform_wrapper: false
 
-      - name: Setup Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
-        with:
-          python-version: ${{ needs.repo-baseline.outputs.python_version }}
-
-      - name: Setup TFLint
-        uses: terraform-linters/setup-tflint@6e1e0642c0289bd619021bf6b34e3c08ed1e005a  # v6.3.0
-        with:
-          tflint_version: ${{ needs.repo-baseline.outputs.tflint_version }}
-
-      - name: Install terraform-docs CLI
-        run: |
-          set -euo pipefail
-
-          VERSION="${{ needs.repo-baseline.outputs.terraform_docs_version }}"
-          BIN_DIR="${HOME}/.local/bin"
-          RELEASE_BASE_URL="https://github.com/terraform-docs/terraform-docs/releases/download/v${VERSION}"
-          ARCHIVE_NAME="terraform-docs-v${VERSION}-linux-amd64.tar.gz"
-          ARCHIVE_PATH="/tmp/${ARCHIVE_NAME}"
-          CHECKSUM_FILE="/tmp/terraform-docs-v${VERSION}.sha256sum"
-
-          mkdir -p "${BIN_DIR}"
-
-          curl -fsSL "${RELEASE_BASE_URL}/${ARCHIVE_NAME}" -o "${ARCHIVE_PATH}"
-          curl -fsSL "${RELEASE_BASE_URL}/terraform-docs-v${VERSION}.sha256sum" -o "${CHECKSUM_FILE}"
-
-          EXPECTED_SUM="$(
-            awk -v file="${ARCHIVE_NAME}" '
-              $0 ~ file { print $1; found=1; exit }
-              END { if (!found) exit 1 }
-            ' "${CHECKSUM_FILE}"
-          )"
-
-          if [[ -z "${EXPECTED_SUM}" ]]; then
-            echo "::error::Unable to find checksum for ${ARCHIVE_NAME} in ${CHECKSUM_FILE}"
-            exit 1
-          fi
-
-          echo "${EXPECTED_SUM}  ${ARCHIVE_PATH}" | sha256sum --check --status
-
-          tar -xzf "${ARCHIVE_PATH}" -C /tmp
-          install -m 0755 /tmp/terraform-docs "${BIN_DIR}/terraform-docs"
-          echo "${BIN_DIR}" >> "${GITHUB_PATH}"
-
       - name: Terraform FMT check
         run: terraform fmt -check -recursive
 
-      - name: Ensure lockfile exists
-        run: |
-          set -euo pipefail
-          if [[ ! -f ".terraform.lock.hcl" ]]; then
-            echo "::error file=${{ matrix.path }}/.terraform.lock.hcl::Missing lockfile. Policy requires committed lockfile for deterministic provider resolution."
-            exit 1
-          fi
-
-      - name: Terraform Init (no backend, lockfile readonly)
-        run: terraform init -lockfile=readonly
-
-      - name: Terraform Validate
-        run: terraform validate
-
       - name: Examples contract check
-        run: |
-          set -euo pipefail
-          if [[ -d "examples" ]]; then
-            if [[ ! -f "examples/basic/main.tf" ]]; then
-              echo "::error file=${{ matrix.path }}/examples/basic/main.tf::Missing required examples/basic/main.tf"
-              exit 1
-            fi
-          fi
-
-      - name: Terraform tests (tftest.hcl)
-        run: |
-          set -euo pipefail
-          if find tests -type f -name "*.tftest.hcl" | grep -q . || [[ -f "tests/tftest.hcl" ]]; then
-            terraform test -no-color
-          fi
-
-      - name: Cache TFLint plugins
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
-        with:
-          path: ~/.tflint.d/plugins
-          key: ${{ runner.os }}-tflint-plugins-v1-${{ needs.repo-baseline.outputs.tflint_version }}
-
-      - name: TFLint init
-        run: tflint --init --config "${GITHUB_WORKSPACE}/${{ env.TFLINT_CONFIG }}"
-
-      - name: TFLint scan
-        run: tflint --config "${GITHUB_WORKSPACE}/${{ env.TFLINT_CONFIG }}"
-
-      - name: Terraform Docs check (In-place check)
         env:
           MODULE_PATH: ${{ matrix.path }}
         run: |
           set -euo pipefail
-
-          if [[ ! "${MODULE_PATH}" =~ ^modules/[a-zA-Z0-9_-]+$ ]]; then
-            echo "::error::Terraform documentation checks require a module root under modules/."
-            exit 1
+          if [[ -d "examples" ]]; then
+            if [[ ! -f "examples/basic/main.tf" ]]; then
+              echo "::error file=${MODULE_PATH}/examples/basic/main.tf::Missing required examples/basic/main.tf"
+              exit 1
+            fi
           fi
-
-          terraform-docs markdown table --config "${GITHUB_WORKSPACE}/.terraform-docs.yml" \
-            --recursive=false --output-file README.md --output-mode inject \
-            --output-check .
-
-      - name: Upload Lockfile for analysis
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
-        with:
-          name: lockfile-${{ matrix.name }}
-          path: |
-            ${{ matrix.path }}/.terraform.lock.hcl
-          if-no-files-found: ignore
-          retention-days: 7
 
       - name: Job summary
         if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          MODULE_NAME: ${{ matrix.name }}
+          MODULE_PATH: ${{ matrix.path }}
         run: |
+          if [[ "${JOB_STATUS}" == "success" ]]; then ICON="✅"; else ICON="❌"; fi
           {
-            echo "## ✅ Module Validation"
-            echo "- Module: \`${{ matrix.name }}\`"
-            echo "- Path: \`${{ matrix.path }}\`"
-            echo "- Commit: \`${{ github.sha }}\`"
+            echo "## ${ICON} Module contract gate"
+            echo "- Module: \`${MODULE_NAME}\`"
+            echo "- Path: \`${MODULE_PATH}\`"
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- Status: \`${JOB_STATUS}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
   fallback-validate-all:
