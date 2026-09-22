@@ -629,19 +629,12 @@ tasks:
     cmds:
       - |
         sh -c '
-          SCRIPT="{{.SMOKE_TEST_SCRIPT}}"
+          SCRIPT="{{.ROOT_DIR}}/tests/smoke/run-smoke-tests.sh"
           if [ ! -f "$SCRIPT" ]; then
             echo "Skipping smoke tests: $SCRIPT not found"
             exit 0
           fi
-          if command -v python3 >/dev/null 2>&1; then
-            python3 "$SCRIPT"
-          elif command -v python >/dev/null 2>&1; then
-            python "$SCRIPT"
-          else
-            echo "Python not found (python3/python)"
-            exit 1
-          fi
+          exec bash "$SCRIPT" {{.CLI_ARGS}}
         '
 
   test:smoke:windows:
