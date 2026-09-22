@@ -218,14 +218,47 @@ function Invoke-Native {
 
     $script:CurrentStep = "$Command $($Arguments -join ' ')"
     if ($CaptureOutput) {
-        $output = @(& $Command @Arguments 2>&1)
+        $previousNativePreference = $null
+        $hasNativePreference = $null -ne (
+            Get-Variable -Name PSNativeCommandUseErrorActionPreference `
+                -ErrorAction SilentlyContinue
+        )
+
+        if ($hasNativePreference) {
+            $previousNativePreference = $PSNativeCommandUseErrorActionPreference
+            $PSNativeCommandUseErrorActionPreference = $false
+        }
+
+        try {
+            $output = @(& $Command @Arguments 2>&1 | ForEach-Object {
+                [string]$_
+            })
+            $nativeExitCode = $LASTEXITCODE
+        }
+        finally {
+            if ($hasNativePreference) {
+                $PSNativeCommandUseErrorActionPreference = $previousNativePreference
+            }
+        }
     }
     else {
         & $Command @Arguments
+        $nativeExitCode = $LASTEXITCODE
     }
 
-    $nativeExitCode = $LASTEXITCODE
     if ($nativeExitCode -ne 0) {
+        if ($CaptureOutput) {
+            $details = ($output -join [Environment]::NewLine).Trim()
+            if ([string]::IsNullOrWhiteSpace($details)) {
+                $details = '<no output>'
+            }
+            throw @"
+Native command failed with exit code ${nativeExitCode}: $Command $($Arguments -join ' ')
+Output:
+$details
+"@
+        }
+
         throw "Native command failed with exit code ${nativeExitCode}: $Command $($Arguments -join ' ')"
     }
 
@@ -288,7 +321,10 @@ function Test-Version {
         $actual = Get-Version -Command $Command -Arguments $Arguments
     }
     catch {
-        Add-Result 'toolchain' "$Label version probe" 'FAIL' $_.Exception.Message
+        $detail = $_.Exception.ToString().Trim()
+        Add-Result 'toolchain' "$Label version probe" $(
+            'FAIL'
+        ) $detail
         return
     }
 
