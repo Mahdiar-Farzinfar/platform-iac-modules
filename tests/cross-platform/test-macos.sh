@@ -156,7 +156,7 @@ run_check() {
   else
     status=$?
     record_fail "$name"
-    if (( status == 130 )); then
+    if ((status == 130)); then
       return 130
     fi
     return 0
@@ -173,19 +173,19 @@ version_of() {
   local output
 
   case "$tool" in
-    "$PYTHON_BIN")
-      output="$("$tool" --version 2>&1)"
-      ;;
-    "$TERRAFORM_BIN")
-      output="$("$tool" version 2>&1)"
-      ;;
-    "$TFLINT_BIN"|"$CHECKOV_BIN"|"$TRIVY_BIN")
-      output="$("$tool" --version 2>&1)"
-      ;;
-    *)
-      error "No version probe defined for ${tool}"
-      return 1
-      ;;
+  "$PYTHON_BIN")
+    output="$("$tool" --version 2>&1)"
+    ;;
+  "$TERRAFORM_BIN")
+    output="$("$tool" version 2>&1)"
+    ;;
+  "$TFLINT_BIN" | "$CHECKOV_BIN" | "$TRIVY_BIN")
+    output="$("$tool" --version 2>&1)"
+    ;;
+  *)
+    error "No version probe defined for ${tool}"
+    return 1
+    ;;
   esac
 
   printf '%s\n' "$output" |
@@ -270,7 +270,7 @@ run_smoke_tests() {
   local items=()
 
   if [[ -n "$MODULE_FILTER" ]]; then
-    IFS=',' read -r -a items <<< "$MODULE_FILTER"
+    IFS=',' read -r -a items <<<"$MODULE_FILTER"
     for item in "${items[@]}"; do
       normalized="$(normalize_module_filter "$item")"
       [[ -n "$normalized" ]] || continue
@@ -292,28 +292,27 @@ main() {
 
   while (($#)); do
     case "$1" in
-      --help|-h)
-        usage
-        return 0
-        ;;
-      --modules)
-        if (($# < 2)); then
-          error "--modules requires a value"
-          usage >&2
-          exit_status 2
-        fi
-        MODULE_FILTER=$2
-        shift 2
-        ;;
-      --modules=*)
-        MODULE_FILTER="${1#*=}"
-        shift
-        ;;
-      *)
-        error "Unknown argument: $1"
-        usage >&2
+    --help | -h)
+      usage
+      return 0
+      ;;
+    --modules)
+      if (($# < 2)); then
+        error "--modules requires a value" usage >&2
         exit_status 2
-        ;;
+      fi
+      MODULE_FILTER=$2
+      shift 2
+      ;;
+    --modules=*)
+      MODULE_FILTER="${1#*=}"
+      shift
+      ;;
+    *)
+      error "Unknown argument: $1"
+      usage >&2
+      exit_status 2
+      ;;
     esac
   done
 
@@ -372,12 +371,12 @@ main() {
     missing=1
   }
 
-  if (( missing != 0 )); then
+  if ((missing != 0)); then
     exit_status 2
   fi
 
   check_version "Terraform" "$TERRAFORM_BIN" \
-    "$(tr -d '[:space:]' < "$TERRAFORM_VERSION_FILE")"
+    "$(tr -d '[:space:]' <"$TERRAFORM_VERSION_FILE")"
   check_version "Python" "$PYTHON_BIN" "$(version_pin python)"
   check_version "TFLint" "$TFLINT_BIN" "$(version_pin tflint)"
   check_version "Checkov" "$CHECKOV_BIN" "$(version_pin checkov)"
@@ -434,7 +433,7 @@ main() {
   printf '\nSummary\n-------\nPASS: %d\nFAIL: %d\nSKIP: %d\n' \
     "$PASS_COUNT" "$FAIL_COUNT" "$SKIP_COUNT"
 
-  if (( FAIL_COUNT != 0 )); then
+  if ((FAIL_COUNT != 0)); then
     return 1
   fi
 
