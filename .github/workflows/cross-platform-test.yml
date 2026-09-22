@@ -380,8 +380,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python --version
+          python -m pip --version
           python -m pip install --disable-pip-version-check --upgrade pip
           python -m pip install --disable-pip-version-check PyYAML yamllint
+          python -c 'import yaml, yamllint; print("PyYAML and yamllint are available")'
 
       - name: Setup golangci-lint
         uses: golangci/golangci-lint-action@d583c34f0599d37dbac4a198b9c83201be380893  #v9.3.0
@@ -438,6 +441,14 @@ jobs:
         with:
           tflint_version: v${{ needs.resolve-tool-versions.outputs.tflint }}
           tflint_wrapper: false
+
+      - name: Initialize TFLint plugins
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tflint --init
 
       - name: Setup Checkov CLI
         shell: bash
@@ -533,19 +544,6 @@ jobs:
             throw 'Python test tooling installation failed'
           }
 
-      - name: Configure Terraform CLI
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $terraformConfig = Join-Path $env:RUNNER_TEMP 'terraform.tfrc'
-          New-Item -ItemType Directory -Path (Split-Path -Parent $terraformConfig) -Force | Out-Null
-          Set-Content -LiteralPath $terraformConfig -Value @'
-          # Managed by GitHub Actions.
-          # Keep this configuration intentionally empty for cross-platform tests.
-          '@ -NoNewline
-          "TF_CLI_CONFIG_FILE=$terraformConfig" |
-            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
       - name: Setup Task
         uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52  # v3.0.0
         with:
@@ -632,6 +630,30 @@ jobs:
         with:
           tflint_version: v${{ needs.resolve-tool-versions.outputs.tflint }}
           tflint_wrapper: false
+
+      - name: Configure Terraform CLI
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $terraformConfig = Join-Path $env:RUNNER_TEMP 'terraform.tfrc'
+          New-Item -ItemType Directory -Path (Split-Path -Parent $terraformConfig) -Force | Out-Null
+
+          # Create a zero-byte, valid Terraform CLI configuration.
+          [System.IO.File]::WriteAllBytes(
+            $terraformConfig,
+            [byte[]]::new(0)
+          )
+
+          "TF_CLI_CONFIG_FILE=$terraformConfig" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+          $env:TF_CLI_CONFIG_FILE = $terraformConfig
+          Write-Host "Terraform CLI configuration: $terraformConfig"
+
+          & terraform version
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Terraform CLI configuration validation failed'
+          }
 
       - name: Setup Checkov CLI
         shell: bash

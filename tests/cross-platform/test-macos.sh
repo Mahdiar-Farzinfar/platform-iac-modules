@@ -49,12 +49,8 @@ LOG_FILE=""
 # Homebrew is commonly outside the runner's inherited PATH on macOS.
 if command -v brew >/dev/null 2>&1; then
   BREW_PREFIX="$(brew --prefix 2>/dev/null || true)"
-  if [[ -n "$BREW_PREFIX" && -d "$BREW_PREFIX/bin" ]]; then
-    PATH="$BREW_PREFIX/bin:$PATH"
-    export PATH
-  fi
   if [[ -n "$BREW_PREFIX" && -d "$BREW_PREFIX/sbin" ]]; then
-    PATH="$BREW_PREFIX/sbin:$PATH"
+    PATH="$PATH:$BREW_PREFIX/sbin"
     export PATH
   fi
 fi
@@ -332,6 +328,9 @@ main() {
   export CHECKPOINT_DISABLE="${CHECKPOINT_DISABLE:-1}"
   export PYTHONUTF8="${PYTHONUTF8:-1}"
   export PYTHONIOENCODING="${PYTHONIOENCODING:-utf-8}"
+
+  info "Python executable: $(command -v "$PYTHON_BIN")"
+  "$PYTHON_BIN" --version
 
   mkdir -p -- "$OUTPUT_DIR"
   LOG_FILE="${OUTPUT_DIR}/test-macos.log"
