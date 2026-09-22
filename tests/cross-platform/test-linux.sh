@@ -102,7 +102,7 @@ on_exit() {
   if [[ -n "$LOG_FILE" ]]; then
     info "Log: ${LOG_FILE}"
   fi
-  if (( status == 0 )); then
+  if ((status == 0)); then
     info "Completed: ${PASS_COUNT} passed, ${FAIL_COUNT} failed, ${SKIP_COUNT} skipped"
   fi
 
@@ -138,7 +138,7 @@ run_check() {
   else
     status=$?
     record_fail "$name"
-    if (( status == 130 )); then
+    if ((status == 130)); then
       return 130
     fi
     return 0
@@ -162,7 +162,7 @@ version_of() {
     "$TERRAFORM_BIN")
       output="$("$tool" version 2>&1)"
       ;;
-    "$TFLINT_BIN"|"$CHECKOV_BIN"|"$TRIVY_BIN")
+    "$TFLINT_BIN" | "$CHECKOV_BIN" | "$TRIVY_BIN")
       output="$("$tool" --version 2>&1)"
       ;;
     *)
@@ -247,7 +247,7 @@ run_smoke_tests() {
   local -a items=()
 
   if [[ -n "$MODULE_FILTER" ]]; then
-    IFS=',' read -r -a items <<< "$MODULE_FILTER"
+    IFS=',' read -r -a items <<<"$MODULE_FILTER"
     for item in "${items[@]}"; do
       normalized="$(normalize_module_filter "$item")"
       [[ -n "$normalized" ]] || continue
@@ -269,7 +269,7 @@ main() {
 
   while (($#)); do
     case "$1" in
-      --help|-h)
+      --help | -h)
         usage
         return 0
         ;;
@@ -346,12 +346,12 @@ main() {
     missing=1
   }
 
-  if (( missing != 0 )); then
+  if ((missing != 0)); then
     exit 2
   fi
 
   check_version "Terraform" "$TERRAFORM_BIN" \
-    "$(tr -d '[:space:]' < "$TERRAFORM_VERSION_FILE")"
+    "$(tr -d '[:space:]' <"$TERRAFORM_VERSION_FILE")"
   check_version "Python" "$PYTHON_BIN" "$(version_pin python)"
   check_version "TFLint" "$TFLINT_BIN" "$(version_pin tflint)"
   check_version "Checkov" "$CHECKOV_BIN" "$(version_pin checkov)"
@@ -408,7 +408,7 @@ main() {
   printf '\nSummary\n-------\nPASS: %d\nFAIL: %d\nSKIP: %d\n' \
     "$PASS_COUNT" "$FAIL_COUNT" "$SKIP_COUNT"
 
-  if (( FAIL_COUNT != 0 )); then
+  if ((FAIL_COUNT != 0)); then
     exit 1
   fi
 }
