@@ -173,19 +173,19 @@ version_of() {
   local output
 
   case "$tool" in
-  "$PYTHON_BIN")
-    output="$("$tool" --version 2>&1)"
-    ;;
-  "$TERRAFORM_BIN")
-    output="$("$tool" version 2>&1)"
-    ;;
-  "$TFLINT_BIN" | "$CHECKOV_BIN" | "$TRIVY_BIN")
-    output="$("$tool" --version 2>&1)"
-    ;;
-  *)
-    error "No version probe defined for ${tool}"
-    return 1
-    ;;
+    "$PYTHON_BIN")
+      output="$("$tool" --version 2>&1)"
+      ;;
+    "$TERRAFORM_BIN")
+      output="$("$tool" version 2>&1)"
+      ;;
+    "$TFLINT_BIN" | "$CHECKOV_BIN" | "$TRIVY_BIN")
+      output="$("$tool" --version 2>&1)"
+      ;;
+    *)
+      error "No version probe defined for ${tool}"
+      return 1
+      ;;
   esac
 
   printf '%s\n' "$output" |
@@ -292,27 +292,27 @@ main() {
 
   while (($#)); do
     case "$1" in
-    --help | -h)
-      usage
-      return 0
-      ;;
-    --modules)
-      if (($# < 2)); then
-        error "--modules requires a value" usage >&2
+      --help | -h)
+        usage
+        return 0
+        ;;
+      --modules)
+        if (($# < 2)); then
+          error "--modules requires a value" usage >&2
+          exit_status 2
+        fi
+        MODULE_FILTER=$2
+        shift 2
+        ;;
+      --modules=*)
+        MODULE_FILTER="${1#*=}"
+        shift
+        ;;
+      *)
+        error "Unknown argument: $1"
+        usage >&2
         exit_status 2
-      fi
-      MODULE_FILTER=$2
-      shift 2
-      ;;
-    --modules=*)
-      MODULE_FILTER="${1#*=}"
-      shift
-      ;;
-    *)
-      error "Unknown argument: $1"
-      usage >&2
-      exit_status 2
-      ;;
+        ;;
     esac
   done
 
