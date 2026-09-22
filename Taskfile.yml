@@ -355,18 +355,40 @@ tasks:
     platforms: [linux, darwin]
     cmds:
       - |
-        set -euo pipefail
+        bash -euo pipefail <<'BASH'
         if [ ! -d "{{.MODULES_DIR}}" ]; then
           echo "Skipping tflint: modules directory not found at {{.MODULES_DIR}}"
           exit 0
         fi
-        find "{{.MODULES_DIR}}" -type f -name 'main.tf' ! -path '*/.terraform/*' -exec dirname {} \; \
-          | sort -u \
-          | while IFS= read -r module_path; do
-              echo "==> tflint: ${module_path}"
-              tflint --init --config "{{.TOOLING_DIR}}/.tflint.hcl" --chdir "${module_path}"
-              tflint --config "{{.TOOLING_DIR}}/.tflint.hcl" --chdir "${module_path}"
-            done
+
+        tflint_home="$(mktemp -d)"
+        cleanup() {
+          rm -rf -- "$tflint_home"
+        }
+        trap cleanup EXIT
+
+        export HOME="$tflint_home"
+        export USER="${USER:-ci}"
+
+        echo "==> tflint: initialize plugins"
+        tflint --init --config "{{.TOOLING_DIR}}/.tflint.hcl"
+
+        module_list="$(mktemp)"
+        trap 'rm -f -- "$module_list"; cleanup' EXIT
+
+        find "{{.MODULES_DIR}}" -type f -name 'main.tf' \
+          ! -path '*/.terraform/*' \
+          -exec dirname {} \; \
+          | sort -u > "$module_list"
+
+        while IFS= read -r module_path; do
+          [ -n "$module_path" ] || continue
+          echo "==> tflint: ${module_path}"
+          tflint \
+            --config "{{.TOOLING_DIR}}/.tflint.hcl" \
+            --chdir "${module_path}"
+        done < "$module_list"
+        BASH
 
   lint:
     desc: Run all lint/validate checks
