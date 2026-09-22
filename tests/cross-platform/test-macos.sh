@@ -121,20 +121,18 @@ on_error() {
 }
 
 on_exit() {
-  local status=$?
+  local status=$1
 
   if [[ -n "$LOG_FILE" ]]; then
     info "Log: ${LOG_FILE}"
   fi
-  if (( status == 0 )); then
-    info "Completed: ${PASS_COUNT} passed, ${FAIL_COUNT} failed, ${SKIP_COUNT} skipped"
-  fi
+  info "Completed: ${PASS_COUNT} passed, ${FAIL_COUNT} failed, ${SKIP_COUNT} skipped"
 
-  return "$status"
+  exit "$status"
 }
 
 trap 'on_error "${LINENO}" "${BASH_COMMAND}"' ERR
-trap on_exit EXIT
+trap 'status=$?; on_exit "$status"' EXIT
 
 record_pass() {
   PASS_COUNT=$((PASS_COUNT + 1))
@@ -265,9 +263,15 @@ normalize_module_filter() {
 }
 
 run_smoke_tests() {
-  local -a args=()
   local item normalized
-  local -a items=()
+
+  if [[ -z "$MODULE_FILTER" ]]; then
+    bash "$SMOKE_WRAPPER"
+    return $?
+  fi
+
+  local args=()
+  local items=()
 
   if [[ -n "$MODULE_FILTER" ]]; then
     IFS=',' read -r -a items <<< "$MODULE_FILTER"
@@ -432,8 +436,10 @@ main() {
     "$PASS_COUNT" "$FAIL_COUNT" "$SKIP_COUNT"
 
   if (( FAIL_COUNT != 0 )); then
-    exit_status 1
+    return 1
   fi
+
+  return 0
 }
 
 main "$@"

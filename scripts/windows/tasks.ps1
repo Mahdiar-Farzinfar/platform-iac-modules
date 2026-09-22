@@ -392,21 +392,17 @@ function Invoke-TestGo {
 function Invoke-TestSmoke {
     Assert-RequiredParam -Name 'RootDir' -Value $RootDir
 
-    $script = Join-Path $RootDir 'tests/smoke/run-smoke-tests.py'
-    Assert-PathExists -Path $script -Label 'smoke test script'
+    $script = Join-Path $RootDir 'tests/smoke/run-smoke-tests.ps1'
+    Assert-PathExists -Path $script -Label 'Windows smoke test script'
 
-    if (Get-Command python -ErrorAction SilentlyContinue) {
-        Invoke-Native { python $script }
-        return
+    $resolved = (Resolve-Path -LiteralPath $script).Path
+    Write-Host "==> running Windows smoke test suite: $resolved"
+
+    # The wrapper resolves Python, forwards its arguments, and preserves the
+    # smoke test exit code.
+    Invoke-Native {
+        & $resolved
     }
-
-    if (Get-Command py -ErrorAction SilentlyContinue) {
-        Invoke-Native { py $script }
-        return
-    }
-
-    Write-Error 'Python launcher not found (python/py).'
-    exit 1
 }
 
 function Invoke-TestCrossPlatform {
