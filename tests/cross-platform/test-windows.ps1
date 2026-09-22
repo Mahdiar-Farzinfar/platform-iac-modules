@@ -218,28 +218,48 @@ function Invoke-Native {
 
     $script:CurrentStep = "$Command $($Arguments -join ' ')"
     if ($CaptureOutput) {
-        $previousNativePreference = $null
-        $hasNativePreference = $null -ne (
-            Get-Variable -Name PSNativeCommandUseErrorActionPreference `
-                -ErrorAction SilentlyContinue
+        $psi = [System.Diagnostics.ProcessStartInfo]::new()
+        $psi.FileName = $Command
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.CreateNoWindow = $true
+        $psi.WorkingDirectory = (Get-Location).ProviderPath
+
+        $quotedArguments = @(
+            foreach ($argument in $Arguments) {
+                $escaped = [regex]::Replace([string]$argument, '(\\*)"', '$1$1\"')
+                $escaped = [regex]::Replace($escaped, '(\\+)$', '$1$1')
+                '"' + $escaped + '"'
+            }
         )
+        $psi.Arguments = $quotedArguments -join ' '
 
-        if ($hasNativePreference) {
-            $previousNativePreference = $PSNativeCommandUseErrorActionPreference
-            $PSNativeCommandUseErrorActionPreference = $false
-        }
-
+        $process = [System.Diagnostics.Process]::new()
         try {
-            $output = @(& $Command @Arguments 2>&1 | ForEach-Object {
-                [string]$_
-            })
-            $nativeExitCode = $LASTEXITCODE
+            $process.StartInfo = $psi
+            if (-not $process.Start()) {
+                throw "Could not start native command: $Command"
+            }
+
+            $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+            $stderrTask = $process.StandardError.ReadToEndAsync()
+            $process.WaitForExit()
+
+            $stdout = $stdoutTask.GetAwaiter().GetResult()
+            $stderr = $stderrTask.GetAwaiter().GetResult()
+            $nativeExitCode = $process.ExitCode
         }
         finally {
-            if ($hasNativePreference) {
-                $PSNativeCommandUseErrorActionPreference = $previousNativePreference
-            }
+            $process.Dispose()
         }
+
+        if ($nativeExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($stderr)) {
+            Write-Log WARN "Native command stderr (exit code 0): $Command $($Arguments -join ' ')"
+            Write-Host $stderr
+        }
+        $output = @($stdout, $stderr) |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
     }
     else {
         & $Command @Arguments
